@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#172923">
+    <title>Staff Sign In - Vior Hotel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="login-page">
+    <main class="auth-shell">
+        <section class="auth-story" aria-label="Vior Hotel operations">
+            <a class="register-brand" href="/">VIOR <span>HOTEL</span></a>
+            <div class="auth-story-copy">
+                <p class="register-kicker">Operations portal</p>
+                <h1>Welcome back.<br><em>Keep service flowing.</em></h1>
+                <p>Manage live orders, verify payments, and coordinate delivery updates without losing momentum.</p>
+            </div>
+            <div class="register-story-foot"><span>02</span> &nbsp; Staff access</div>
+        </section>
+
+        <section class="auth-panel">
+            <div class="register-panel-top"><span>VIOR HOTEL</span><span>STAFF PORTAL</span></div>
+            <div class="register-form-wrap">
+                <p class="register-kicker">Secure sign in</p>
+                <h2>Operations access</h2>
+                <p class="register-intro">Use your staff phone number and admin password to manage order flow and delivery status.</p>
+
+                {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+                <form action="/login" method="POST" class="register-form">
+                    <div class="form-group">
+                        <label for="phone">Staff phone number</label>
+                        <input id="phone" type="tel" name="phone" autocomplete="username" placeholder="07XXXXXXXX" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="admin_password">Admin password</label>
+                        <input id="admin_password" type="password" name="admin_password" autocomplete="current-password" placeholder="Enter admin password" required>
+                    </div>
+                    <button type="submit" class="register-submit">Access dashboard <span aria-hidden="true">↗</span></button>
+                </form>
+                <p class="register-admin"><a href="{{ url_for('register') }}">Customer registration</a></p>
+            </div>
+            <div class="register-panel-foot">Service with precision.</div>
+        </section>
+    </main>
+
+    <a href="https://wa.me/254703360356?text=Hello%20Vior%20Hotel%2C%20I%20would%20like%20to%20make%20an%20inquiry." class="whatsapp-float" target="_blank" rel="noopener noreferrer" aria-label="Chat on WhatsApp">
+        <img src="https://upload.wikimedia.org/webp/logo/WhatsApp/gif/WhatsApp_logo_1.webp" alt="WhatsApp" style="width: 28px; height: 28px;">
+    </a>
+</body>
+</html>

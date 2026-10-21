@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your Cart - Vior Hotel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+</head>
+<body class="page-shell" data-cart-key="{{ session.get('customer_phone', 'guest-' ~ session.get('cart_id', '')) }}">
+    <header class="site-header cart-header">
+        <div class="container nav-shell">
+            <a class="brand" href="/">
+                <span class="brand-mark">V</span>
+                <span>Vior Hotel</span>
+            </a>
+            <nav class="main-nav" aria-label="Cart navigation">
+                <a href="/">Back to menu</a>
+                <a href="#checkout">Checkout</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container cart-layout">
+        <section class="form-container cart-panel" id="checkout">
+            <div class="section-heading left">
+                <p class="eyebrow eyebrow-red">Your order</p>
+                <h2>Order summary</h2>
+            </div>
+            <div id="cartItems" class="cart-items"></div>
+            <div class="cart-total-row">
+                <span>Total</span>
+                <h3 id="cartTotal">KES 0</h3>
+            </div>
+
+            <hr>
+            <div class="checkout-details">
+                <h3>Checkout details</h3>
+                {% if session.get('customer_name') %}
+                <p>Customer: <strong>{{ session.get('customer_name') }}</strong> · {{ session.get('customer_phone') }}</p>
+                {% else %}
+                <p><a href="{{ url_for('login') }}">Register or log in</a> to keep a separate cart for your account.</p>
+                {% endif %}
+            </div>
+
+            <div class="form-group">
+                <label>Delivery Method</label>
+                <select id="deliveryMethod">
+                    <option value="Pickup">Pickup at Hotel</option>
+                    <option value="Online">Online Delivery</option>
+                </select>
+            </div>
+
+            <div id="deliveryStatus" class="delivery-status" aria-live="polite"></div>
+
+            <div class="form-group" id="deliveryAddressGroup" hidden>
+                <label for="deliveryStreet">Delivery Address</label>
+                <input id="deliveryStreet" maxlength="250" autocomplete="address-line1" placeholder="Street address" required>
+                <input id="deliveryLocality" maxlength="150" autocomplete="address-level2" placeholder="Town or city" required>
+                <input id="deliveryRegion" maxlength="150" autocomplete="address-level1" placeholder="County, state, or region">
+                <div class="address-postal-row">
+                    <input id="deliveryPostalCode" maxlength="20" autocomplete="postal-code" placeholder="Postal code" required>
+                    <input id="deliveryCountry" maxlength="100" autocomplete="country-name" placeholder="Country" required>
+                </div>
+                <button type="button" class="btn btn-primary" id="verifyAddressBtn">Verify address &amp; postal code</button>
+                <div id="addressVerificationStatus" class="verification-status" aria-live="polite"></div>
+                <small class="optional-note">Address matching uses OpenStreetMap address data. This confirms a map/postcode match, not courier availability. The hotel must confirm delivery cost and timing.</small>
+                <label id="confirmAddressGroup" class="address-confirmation" hidden>
+                    <input type="checkbox" id="confirmVerifiedAddress">
+                    I confirm this matched address is my intended delivery destination.
+                </label>
+            </div>
+
+            <div class="form-group">
+                <label for="mpesaPhone">M-Pesa Phone Number</label>
+                <input type="tel" id="mpesaPhone" placeholder="07XXXXXXXX" autocomplete="tel" inputmode="tel" required>
+            </div>
+
+            <div class="payment-options">
+                <button id="checkoutBtn" class="btn btn-primary" onclick="processCheckout()">Pay with M-Pesa</button>
+                <button id="tillBtn" class="btn btn-secondary" onclick="payByTill()">Pay to Till 3484738</button>
+            </div>
+            <div id="tillInstructions" class="payment-notice" role="status" aria-live="polite" hidden></div>
+            <div id="orderConfirmation" class="payment-notice" role="status" aria-live="polite" hidden></div>
+        </section>
+
+        <aside class="cart-side">
+            <div class="tracking-card compact-tracking">
+                <div class="tracking-card-header">
+                    <div>
+                        <span class="tracking-eyebrow">LIVE ORDER UPDATES</span>
+                        <h3>Track current order</h3>
+                    </div>
+                </div>
+                <form id="trackOrderForm" class="tracking-form">
+                    <div class="form-group">
+                        <label for="trackOrderNumber">Order Number</label>
+                        <input type="text" id="trackOrderNumber" placeholder="VH-202610010101010000" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-wide">Track Order</button>
+                </form>
+            </div>
+
+            <div id="trackingResult" class="tracking-card" aria-live="polite" hidden>
+                <div class="tracking-card-header">
+                    <div>
+                        <span class="tracking-eyebrow">LIVE ORDER UPDATES</span>
+                        <h3 id="trackingStatusLabel">Checking order…</h3>
+                    </div>
+                    <span id="mapStatusBadge" class="map-status-badge">Waiting</span>
+                </div>
+                <p id="trackingMessage" class="tracking-message">We’re checking the latest order update.</p>
+                <div class="tracking-progress-track" role="progressbar" aria-label="Order progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                    <div id="trackingProgress" class="tracking-progress-fill"></div>
+                </div>
+                <ol class="tracking-steps" id="trackingSteps">
+                    <li data-step="Pending"><span>1</span><strong>Received</strong><small>Order logged</small></li>
+                    <li data-step="Preparing"><span>2</span><strong>Preparing</strong><small>Kitchen is preparing</small></li>
+                    <li data-step="Out for Delivery"><span>3</span><strong>Dispatched</strong><small>Driver is on the way</small></li>
+                    <li data-step="Delivered"><span>4</span><strong>Delivered</strong><small>Order completed</small></li>
+                </ol>
+                <div class="tracking-meta">
+                    <span id="trackingUpdatedAt">Last update: —</span>
+                    <span id="trackingRefreshState">Updates every 10 seconds</span>
+                </div>
+            </div>
+
+            <div class="map-card tracking-map-card" id="trackingMapCard" hidden>
+                <div class="map-header">
+                    <div><strong>Driver location</strong><small id="driverMapCaption">Live location is shared when the driver enables GPS.</small></div>
+                    <span id="driverLocationAge" class="map-status-badge">No signal</span>
+                </div>
+                <div id="trackingMap" aria-label="Map showing verified delivery destination and live driver location"></div>
+                <div class="map-footer">
+                    <span class="map-legend"><span class="legend-dot hotel-dot"></span>Verified destination</span>
+                    <span class="map-legend"><span class="legend-dot driver-dot"></span>Driver GPS</span>
+                    <span id="trackingEta" class="map-eta">ETA appears when the hotel provides one</span>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <a href="https://wa.me/254703360356?text=Hello%20Vior%20Hotel%2C%20I%20would%20like%20to%20make%20an%20inquiry." class="whatsapp-float" target="_blank" rel="noopener noreferrer" aria-label="Chat on WhatsApp">
+        <img src="https://upload.wikimedia.org/webp/logo/WhatsApp/gif/WhatsApp_logo_1.webp" alt="WhatsApp" style="width: 28px; height: 28px;">
+    </a>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    <script>
+        let checkoutCart;
+        let verifiedAddress = null;
+        try {
+            const savedCart = JSON.parse(localStorage.getItem(CART_STORAGE_KEY) || '[]');
+            checkoutCart = Array.isArray(savedCart) ? savedCart.filter(item => item && typeof item.name === 'string' && Number.isFinite(Number(item.price))) : [];
+        } catch (error) {
+            checkoutCart = [];
+        }
+
+        function loadCart() {
+            const cartDiv = document.getElementById('cartItems');
+            const totalDiv = document.getElementById('cartTotal');
+            let total = 0;
+            cartDiv.innerHTML = '';
+
+            if (checkoutCart.length === 0) {
+                cartDiv.innerHTML = '<p class="empty-order">Your cart is empty.</p>';
+            } else {
+                checkoutCart.forEach((item, index) => {
+                    const row = document.createElement('div');
+                    row.className = 'cart-item';
+                    const name = document.createElement('span');
+                    name.textContent = item.name;
+                    const price = document.createElement('span');
+                    price.textContent = `KES ${Number(item.price)}`;
+                    const remove = document.createElement('button');
+                    remove.type = 'button';
+                    remove.className = 'remove-item';
+                    remove.textContent = 'Remove';
+                    remove.setAttribute('aria-label', `Remove ${item.name} from cart`);
+                    remove.addEventListener('click', () => {
+                        checkoutCart.splice(index, 1);
+                        localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(checkoutCart));
+                        loadCart();
+                    });
+                    row.append(name, price, remove);
+                    cartDiv.appendChild(row);
+                    total += Number(item.price);
+                });
+            }
+            totalDiv.innerText = `KES ${total}`;
+            return total;
+        }
+
+        async function processCheckout() {
+            const total = loadCart();
+            const phone = document.getElementById('mpesaPhone').value.trim();
+            const method = document.getElementById('deliveryMethod').value;
+            const addressPayload = getDeliveryAddressPayload();
+            const button = document.getElementById('checkoutBtn');
+
+            if (total === 0) { alert("Your cart is empty!"); return; }
+            if (!phone) { alert("Please enter the M-Pesa phone number to receive the payment prompt."); return; }
+            if (method === 'Online' && (!verifiedAddress || verifiedAddress.address !== addressPayload.delivery_address || verifiedAddress.postal_code !== addressPayload.delivery_postal_code || !document.getElementById('confirmVerifiedAddress').checked)) { alert('Verify the address and confirm the matched destination before checkout.'); return; }
+
+            button.disabled = true;
+            button.textContent = 'Connecting to M-Pesa…';
+            try {
+                const response = await fetch('/api/mpesa/pay', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ items: checkoutCart, phone, order_type: method, ...addressPayload, address_verification_token: verifiedAddress?.verification_token })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || data.errorMessage || 'Payment could not be started.');
+                if (data.ResponseCode === '0' || data.CheckoutRequestID) {
+                    clearCheckoutCart();
+                    showOrderConfirmation(data.OrderNumber, 'M-Pesa prompt sent. Check your phone and enter your PIN to complete payment.');
+                } else {
+                    throw new Error(data.errorMessage || data.CustomerMessage || 'M-Pesa could not start the payment.');
+                }
+            } catch (error) {
+                alert(error.message || 'Network error. Please try again.');
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Pay with M-Pesa';
+            }
+        }
+
+        async function payByTill() {
+            const total = loadCart();
+            const phone = document.getElementById('mpesaPhone').value.trim();
+            const method = document.getElementById('deliveryMethod').value;
+            const addressPayload = getDeliveryAddressPayload();
+            const button = document.getElementById('tillBtn');
+
+            if (total === 0) { alert('Your cart is empty!'); return; }
+            if (!phone) { alert('Please enter a phone number for your order.'); return; }
+            if (method === 'Online' && (!verifiedAddress || verifiedAddress.address !== addressPayload.delivery_address || verifiedAddress.postal_code !== addressPayload.delivery_postal_code || !document.getElementById('confirmVerifiedAddress').checked)) { alert('Verify the address and confirm the matched destination before checkout.'); return; }
+
+            button.disabled = true;
+            button.textContent = 'Preparing till instructions…';
+            try {
+                const response = await fetch('/api/mpesa/till-order', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({items: checkoutCart, phone, order_type: method, ...addressPayload, address_verification_token: verifiedAddress?.verification_token})
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Could not prepare the Till order.');
+
+                clearCheckoutCart();
+
+                const notice = document.getElementById('tillInstructions');
+                notice.replaceChildren();
+                const title = document.createElement('strong');
+                title.textContent = 'Complete payment in M-Pesa';
+                const details = document.createElement('p');
+                details.textContent = `Select Lipa na M-Pesa → Buy Goods and Services, enter Till ${data.till_number}, and pay KES ${data.amount}.`;
+                const reference = document.createElement('p');
+                reference.textContent = `Keep order number ${data.order_number} to track preparation and dispatch. Keep your M-Pesa confirmation message; the hotel must verify payment before preparing your order.`;
+                notice.append(title, details, reference);
+                notice.hidden = false;
+                showOrderConfirmation(data.order_number, 'Order saved. Complete your Till payment, then the hotel will verify it.');
+                button.textContent = 'Till instructions ready';
+                button.disabled = true;
+                document.getElementById('checkoutBtn').disabled = true;
+            } catch (error) {
+                alert(error.message || 'Network error. Please try again.');
+                button.disabled = false;
+                button.textContent = 'Pay to Till 3484738';
+            }
+        }
+
+        function showOrderConfirmation(orderNumber, message) {
+            if (!orderNumber) return;
+            const confirmation = document.getElementById('orderConfirmation');
+            confirmation.replaceChildren();
+            const heading = document.createElement('strong');
+            heading.textContent = 'Your order number';
+            const numberRow = document.createElement('div');
+            numberRow.className = 'order-number-row';
+            const number = document.createElement('code');
+            number.textContent = orderNumber;
+            const copyButton = document.createElement('button');
+            copyButton.type = 'button';
+            copyButton.className = 'btn btn-primary copy-order-number';
+            copyButton.textContent = 'Copy';
+            copyButton.addEventListener('click', async () => {
+                try {
+                    await navigator.clipboard.writeText(String(orderNumber));
+                    copyButton.textContent = 'Copied';
+                } catch {
+                    copyButton.textContent = 'Copy failed';
+                }
+                setTimeout(() => { copyButton.textContent = 'Copy'; }, 1500);
+            });
+            numberRow.append(number, copyButton);
+            const summary = document.createElement('p');
+            summary.textContent = message;
+            confirmation.append(heading, numberRow, summary);
+            confirmation.hidden = false;
+        }
+
+        function clearCheckoutCart() {
+            checkoutCart = [];
+            localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(checkoutCart));
+            loadCart();
+        }
+
+        document.addEventListener('DOMContentLoaded', loadCart);
+    </script>
+</body>
+</html>

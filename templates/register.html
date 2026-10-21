@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#172923">
+    <title>Welcome to Vior Hotel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="register-page">
+    <main class="register-shell">
+        <section class="register-story" aria-label="Welcome to Vior Hotel">
+            <a class="register-brand" href="/register">VIOR <span>HOTEL</span></a>
+            <div class="register-story-copy">
+                <p class="register-kicker">A little escape, just for you</p>
+                <h1>Good taste.<br><em>Beautiful moments.</em></h1>
+                <p>Settle in, explore our menu, and let us take care of the details.</p>
+            </div>
+            <div class="register-story-foot"><span>01</span> &nbsp; Your table is waiting</div>
+        </section>
+
+        <section class="register-panel">
+            <div class="register-panel-top"><span>VIOR HOTEL</span><span>NAIROBI · KENYA</span></div>
+            <div class="register-form-wrap">
+                <p class="register-kicker">Welcome to Vior</p>
+                <h2>Make yourself<br>at home.</h2>
+                <p class="register-intro">A couple of details and you're in. We’ll use them to make your orders feel effortless.</p>
+
+                {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+                <form action="{{ url_for('register') }}" method="POST" class="register-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <div class="form-group">
+                        <label for="fullname">Your name</label>
+                        <input id="fullname" type="text" name="fullname" value="{{ fullname|default('') }}" placeholder="How should we address you?" autocomplete="name" minlength="2" maxlength="80" required autofocus>
+                    </div>
+                    <div class="form-group">
+                        <label for="phone">Mobile number</label>
+                        <input id="phone" type="tel" name="phone" value="{{ phone|default('') }}" placeholder="0712 345 678" autocomplete="tel" inputmode="tel" maxlength="18" pattern="[+0-9() -]{9,18}" aria-describedby="phone-help" required>
+                        <small id="phone-help">Kenyan number used for your M-Pesa checkout and order details.</small>
+                    </div>
+                    <button type="submit" class="register-submit">Continue to Vior <span aria-hidden="true">↗</span></button>
+                </form>
+                <p class="register-privacy"><span aria-hidden="true">✦</span> Just your name and phone — no password, date of birth, or extra details. Phone ownership is not SMS-verified yet.</p>
+                <p class="register-admin">Hotel staff? <a href="{{ url_for('login') }}">Staff sign in</a></p>
+            </div>
+            <div class="register-panel-foot">A warm welcome, every time.</div>
+        </section>
+    </main>
+</body>
+</html>

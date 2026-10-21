@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Vior Hotel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="admin-page">
+    <header class="site-header admin-header">
+        <div class="container nav-shell">
+            <a class="brand" href="{{ url_for('index') }}">
+                <span class="brand-mark">V</span>
+                <span>Vior Hotel</span>
+            </a>
+            <nav class="main-nav" aria-label="Admin navigation">
+                <span class="nav-welcome">Admin Dashboard</span>
+                <a href="{{ url_for('logout') }}">Logout</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container admin-shell">
+        <section class="admin-panel">
+            <div class="section-heading left">
+                <p class="eyebrow eyebrow-red">Operations</p>
+                <h2>Incoming orders</h2>
+            </div>
+
+            <div class="table-wrap">
+                <table class="orders-table">
+                    <thead>
+                        <tr>
+                            <th>Order Number</th>
+                            <th>Customer</th>
+                            <th>Phone</th>
+                            <th>Items</th>
+                            <th>Type</th>
+                            <th>Delivery Address</th>
+                            <th>Address Check</th>
+                            <th>Delivery Time</th>
+                            <th>Amount</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for order in orders %}
+                        <tr>
+                            <td>{{ order.order_number }}</td>
+                            <td>{{ order.customer_name or 'Guest' }}</td>
+                            <td>{{ order.customer_phone }}</td>
+                            <td>{{ order.items or '—' }}</td>
+                            <td>{{ order.order_type }}</td>
+                            <td>{{ order.delivery_address or 'Pickup' }}</td>
+                            <td>{% if order.order_type == 'Online' %}{{ 'Verified' if order.address_verified else 'Not verified' }}{% if order.delivery_postal_code %}<br><small>Postcode: {{ order.delivery_postal_code }}</small>{% endif %}{% else %}—{% endif %}</td>
+                            <td>{{ order.delivery_time }}</td>
+                            <td>KES {{ '%.0f'|format(order.amount) }}</td>
+                            <td>{{ order.status }}</td>
+                            <td>
+                                {% if order.status == 'Awaiting Till Payment — verify manually' %}
+                                <form method="POST" action="{{ url_for('update_order_status', order_id=order.id) }}">
+                                    <input type="hidden" name="status" value="Payment Verified">
+                                    <button type="submit" class="btn btn-primary admin-action">Verify Till Payment</button>
+                                </form>
+                                {% elif order.status in ['Paid', 'Payment Verified', 'Pending'] %}
+                                <form method="POST" action="{{ url_for('update_order_status', order_id=order.id) }}">
+                                    <input type="hidden" name="status" value="Preparing">
+                                    <button type="submit" class="btn btn-primary admin-action">Start Preparing</button>
+                                </form>
+                                {% elif order.status in ['Preparing', 'Out for Delivery'] %}
+                                <form method="POST" action="{{ url_for('update_order_status', order_id=order.id) }}" class="status-update-form">
+                                    <select name="status" aria-label="Update status for {{ order.order_number }}">
+                                        {% if order.status == 'Preparing' %}
+                                        <option value="Out for Delivery">Out for Delivery</option>
+                                        {% else %}
+                                        <option value="Delivered">Delivered</option>
+                                        {% endif %}
+                                    </select>
+                                    <button type="submit" class="btn btn-primary admin-action">Update</button>
+                                </form>
+                                {% if order.status == 'Out for Delivery' %}
+                                <div class="driver-gps-control" data-order-id="{{ order.id }}">
+                                    <button type="button" class="btn btn-primary gps-share-button">Share live GPS</button>
+                                    <span class="gps-share-status" aria-live="polite">GPS sharing is off</span>
+                                </div>
+                                <a class="whatsapp-cta" target="_blank" rel="noopener noreferrer"
+                                   href="https://wa.me/{{ order.customer_phone }}?text={{ ('Vior Hotel: your order ' ~ order.order_number ~ ' is out for delivery. Track it at ' ~ request.host_url ~ 'cart')|urlencode }}">
+                                    Notify customer on WhatsApp
+                                </a>
+                                {% endif %}
+                                {% elif order.status == 'Delivered' %}
+                                <span class="status-pill status-pill-delivered">Delivered</span>
+                                {% else %}
+                                <span class="status-pill status-pill-waiting">Awaiting payment</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="11" class="empty-orders">No orders yet. New orders will appear here.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <a href="https://wa.me/254703360356?text=Hello%20Vior%20Hotel%2C%20I%20would%20like%20to%20make%20an%20inquiry." class="whatsapp-float" target="_blank" rel="noopener noreferrer" aria-label="Chat on WhatsApp">
+        <img src="https://upload.wikimedia.org/webp/logo/WhatsApp/gif/WhatsApp_logo_1.webp" alt="WhatsApp" style="width: 28px; height: 28px;">
+    </a>
+
+    <script>
+        document.querySelectorAll('.driver-gps-control').forEach(control => {
+            const button = control.querySelector('.gps-share-button');
+            const status = control.querySelector('.gps-share-status');
+            let watchId = null;
+            let lastSentAt = 0;
+            button.addEventListener('click', () => {
+                if (watchId !== null) {
+                    navigator.geolocation.clearWatch(watchId);
+                    watchId = null;
+                    button.textContent = 'Share live GPS';
+                    status.textContent = 'GPS sharing is off';
+                    return;
+                }
+                if (!navigator.geolocation) {
+                    status.textContent = 'This device does not support GPS sharing.';
+                    return;
+                }
+                button.textContent = 'Stop GPS sharing';
+                status.textContent = 'Waiting for a precise GPS fix…';
+                watchId = navigator.geolocation.watchPosition(async position => {
+                    const now = Date.now();
+                    if (now - lastSentAt < 8000) return;
+                    lastSentAt = now;
+                    try {
+                        const response = await fetch(`/api/admin/order/${control.dataset.orderId}/location`, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                latitude: position.coords.latitude,
+                                longitude: position.coords.longitude,
+                                accuracy: position.coords.accuracy,
+                            }),
+                        });
+                        const data = await response.json();
+                        if (!response.ok) throw new Error(data.error || 'GPS update failed.');
+                        status.textContent = `Live location shared · ±${Math.round(position.coords.accuracy)} m`;
+                    } catch (error) {
+                        status.textContent = error.message;
+                    }
+                }, error => {
+                    status.textContent = error.message || 'Could not read GPS location.';
+                    navigator.geolocation.clearWatch(watchId);
+                    watchId = null;
+                    button.textContent = 'Share live GPS';
+                }, {enableHighAccuracy: true, maximumAge: 5000, timeout: 20000});
+            });
+        });
+    </script>
+</body>
+</html>

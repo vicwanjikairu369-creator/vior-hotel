@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vior Hotel | Premium Dining</title>
+    <meta name="description" content="Vior Hotel offers premium Kenyan dining, chef-crafted meals, and fast delivery service in a refined restaurant experience.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800;900&family=Poppins:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/@lottiefiles/lottie-player@latest/dist/lottie-player.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body data-menu='{{ menu_items|tojson }}' data-cart-key="{{ session.get('customer_phone', 'guest-' ~ session.get('cart_id', '')) }}">
+    <header class="site-header">
+        <div class="container nav-shell">
+            <a class="brand" href="#top" aria-label="Vior Hotel home">
+                <span class="brand-mark">V</span>
+                <span>Vior Hotel</span>
+            </a>
+            <nav class="main-nav" aria-label="Main navigation">
+                <a href="#top">Home</a>
+                <a href="#menu">Menu</a>
+                <a href="#experience">Experience</a>
+                <a href="#reviews">Reviews</a>
+                <a href="#contact">Contact</a>
+                <span class="nav-welcome">Welcome, {{ session.get('customer_name') or 'Guest' }}</span>
+                <a href="/cart" class="nav-cart">Cart</a>
+                <a href="/logout">Sign out</a>
+            </nav>
+        </div>
+    </header>
+
+    <main id="top">
+        <section class="hero" aria-label="Vior Hotel banner">
+            <div class="hero-backdrop"></div>
+            <div class="container hero-inner">
+                <div class="hero-copy">
+                    <p class="eyebrow">Kenyan fine dining • crafted daily</p>
+                    <h1>Vior Hotel</h1>
+                    <p class="hero-text">Bold Kenyan comfort food, thoughtfully prepared and served in a refined, welcoming space.</p>
+                    <div class="hero-actions">
+                        <a href="#menu" class="btn btn-primary">View Menu</a>
+                        <a href="/cart" class="btn btn-secondary">Order Now</a>
+                    </div>
+                    <ul class="hero-meta" aria-label="Vior Hotel highlights">
+                        <li>Fresh ingredients</li>
+                        <li>Fast delivery</li>
+                        <li>Open daily</li>
+                    </ul>
+                </div>
+
+                <aside class="hero-panel" aria-label="Chef's special">
+                    <span class="panel-kicker">Chef's signature</span>
+                    <h2>Grand Feast</h2>
+                    <p>Ugali Nyama Choma, fresh greens, and house-made sides with warm hospitality.</p>
+                    <div class="panel-cta">
+                        <span>KES 400</span>
+                        <a href="#menu" class="mini-link">Explore menu</a>
+                    </div>
+                </aside>
+            </div>
+        </section>
+
+        <section id="experience" class="experience-strip">
+            <div class="container experience-grid">
+                <div>
+                    <span class="feature-icon">✦</span>
+                    <h3>Free WiFi</h3>
+                    <p>Unwind while you dine in our relaxing lounge.</p>
+                </div>
+                <div>
+                    <span class="feature-icon">✓</span>
+                    <h3>Freshly prepared</h3>
+                    <p>Meals cooked to order using local ingredients.</p>
+                </div>
+                <div>
+                    <span class="feature-icon">⏱</span>
+                    <h3>Fast service</h3>
+                    <p>Efficient prep and easy ordering for busy days.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="menu-section" id="menu">
+            <div class="container">
+                <div class="section-heading">
+                    <p class="eyebrow eyebrow-red">Chef's collection</p>
+                    <h2>Comfort food, elevated.</h2>
+                </div>
+
+                <div class="menu-category">
+                    <h3>Breakfast</h3>
+                    <div class="menu-grid">
+                        <article class="menu-card visual-tea">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_tea.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/tea.jpg" alt="Tea" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Antioxidants</span>
+                                    <strong>KES 50</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Tea</h4>
+                                <p>Low calorie, comforting, and refreshing.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Tea', 50)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-sausage">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_meat.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/sausages.jpg" alt="Sausages" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Protein-rich</span>
+                                    <strong>KES 60</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Sausages</h4>
+                                <p>Smoky, hearty, and full of flavor.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Sausages', 60)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-bread">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_bread.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/bread.jpg" alt="Bread" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Fiber & carbs</span>
+                                    <strong>KES 50</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Bread</h4>
+                                <p>Golden, warm, and perfect with toppings.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Bread', 50)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-breakfast">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_meat.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/omelette.jpg" alt="Omelette" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>High protein</span>
+                                    <strong>KES 100</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Omelettes</h4>
+                                <p>Fluffy, savory, and made fresh.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Omelette', 100)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-breakfast">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_fruits.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/eggs.jpg" alt="Eggs" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Vitamin D</span>
+                                    <strong>KES 50</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Eggs</h4>
+                                <p>Classic and packed with essential nutrients.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Eggs', 50)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-chapati">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_bread.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/chapati.jpg" alt="Chapati" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Carb comfort</span>
+                                    <strong>KES 20</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Chapati</h4>
+                                <p>Soft layers and a warm homemade finish.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Chapati', 20)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-breakfast">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_bread.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/mandazi.jpg" alt="Mandazi" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Golden crisp</span>
+                                    <strong>KES 20</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Mandazi</h4>
+                                <p>Sweet, airy, and a favorite for tea time.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Mandazi', 20)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-soda">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_juice.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/juice.jpg" alt="Fresh Juice" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Vitamin C</span>
+                                    <strong>KES 150</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Fresh Juices</h4>
+                                <p>Mango, orange, and pineapple blends.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Fresh Juice', 150)">Add to Cart</button>
+                        </article>
+                    </div>
+                </div>
+
+                <div class="menu-category">
+                    <h3>Lunch & dinner</h3>
+                    <div class="menu-grid">
+                        <article class="menu-card visual-breakfast">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_bread.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/chapati_beans.jpg" alt="Chapati Beans" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Protein & fiber</span>
+                                    <strong>KES 150</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Chapati Beans</h4>
+                                <p>Hearty beans balanced with soft chapati.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Chapati Beans', 150)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-chapati">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_meat.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/ugali_beef.jpg" alt="Ugali Beef Stew" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Iron-rich</span>
+                                    <strong>KES 250</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Ugali Beef Stew</h4>
+                                <p>Classic comfort with rich, earthy flavor.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Ugali Beef Stew', 250)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-breakfast">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_meat.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/ugali_nyama.jpg" alt="Ugali Nyama Choma" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Premium cut</span>
+                                    <strong>KES 400</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Ugali Nyama Choma</h4>
+                                <p>Signature grilled taste with a crowd-pleasing finish.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Ugali Nyama Choma', 400)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-breakfast">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_fruits.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/rice_chicken.jpg" alt="Rice Chicken" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Lean protein</span>
+                                    <strong>KES 300</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Rice Chicken</h4>
+                                <p>Balanced, comforting and perfect for lunch.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Rice Chicken', 300)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-fries">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_fries.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/chips.jpg" alt="Chips" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Crispy comfort</span>
+                                    <strong>KES 150</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Chips</h4>
+                                <p>Perfectly crisp and golden from the fryer.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Chips', 150)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-breakfast">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_fish.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/fish.jpg" alt="Fish" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Omega-3</span>
+                                    <strong>KES 350</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Fish</h4>
+                                <p>Light, savory, and rich in healthy fats.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Fish', 350)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-breakfast">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_fruits.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/matoke.jpg" alt="Matoke" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Potassium boost</span>
+                                    <strong>KES 200</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Matoke</h4>
+                                <p>Extra-special and savory with every bite.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Matoke', 200)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-soda">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_juice.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/soda.jpg" alt="Soda" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Chilled finish</span>
+                                    <strong>KES 80</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Soda</h4>
+                                <p>Bright, bubbly, and ideal with your meal.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Soda', 80)">Add to Cart</button>
+                        </article>
+                    </div>
+                </div>
+
+                <div class="menu-category">
+                    <h3>Snacks & sweets</h3>
+                    <div class="menu-grid">
+                        <article class="menu-card visual-breakfast">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_fruits.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/biscuits.jpg" alt="Biscuits" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Sweet and light</span>
+                                    <strong>KES 50</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Biscuits</h4>
+                                <p>Quick savoury-sweet bites for any hour.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Biscuits', 50)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-breakfast">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_fruits.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/fruit_cake.jpg" alt="Fruit Cake" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Fruit-rich</span>
+                                    <strong>KES 100</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Fruit Cakes</h4>
+                                <p>Moist, decadent, and made for sharing.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Fruit Cake', 100)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-breakfast">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_fries.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/crisps.jpg" alt="Crisps" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Crunch factor</span>
+                                    <strong>KES 100</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Crisps</h4>
+                                <p>Salted, crunchy, and ready whenever you are.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Crisps', 100)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-breakfast">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_meat.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/bites.jpg" alt="Bites" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Snack attack</span>
+                                    <strong>KES 100</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Bites</h4>
+                                <p>Small plates with big flavor and fun texture.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Bites', 100)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-sausage">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_meat.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/meatballs.jpg" alt="Meat Balls" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Protein-packed</span>
+                                    <strong>KES 150</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Meat Balls</h4>
+                                <p>Juicy, savory, and perfect with sauce.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Meat Balls', 150)">Add to Cart</button>
+                        </article>
+
+                        <article class="menu-card visual-breakfast">
+                            <div class="menu-visual">
+                                <lottie-player src="https://assets5.lottiefiles.com/packages/lf20_fruits.json" background="transparent" speed="1" style="width: 100%; height: 180px;" loop autoplay onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"></lottie-player>
+                                <img class="food-image food-fallback" src="/static/images/cupcake.jpg" alt="Cupcakes" style="display: none;">
+                                <div class="menu-overlay">
+                                    <span>Sweet finish</span>
+                                    <strong>KES 100</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>Cupcakes</h4>
+                                <p>Soft, fluffy, and an easy indulgence.</p>
+                            </div>
+                            <button class="btn" onclick="addToCart('Cupcakes', 100)">Add to Cart</button>
+                        </article>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="reviews-section" id="reviews">
+            <div class="container review-shell">
+                <div class="section-heading center">
+                    <p class="eyebrow eyebrow-red">Guest reflections</p>
+                    <h2>People keep coming back.</h2>
+                </div>
+                <div class="review-grid">
+                    <article class="review-card">
+                        <div class="review-head">
+                            <div class="avatar avatar-one">K</div>
+                            <div>
+                                <h4>Kevin</h4>
+                                <span>Food critic</span>
+                            </div>
+                        </div>
+                        <p>“Best Chapati in town! The relaxation zone and warm service make every visit feel premium.”</p>
+                    </article>
+                    <article class="review-card">
+                        <div class="review-head">
+                            <div class="avatar avatar-two">A</div>
+                            <div>
+                                <h4>Amina</h4>
+                                <span>Regular guest</span>
+                            </div>
+                        </div>
+                        <p>“Fast delivery and the meatballs are delicious. The atmosphere feels thoughtful and upscale.”</p>
+                    </article>
+                    <article class="review-card">
+                        <div class="review-head">
+                            <div class="avatar avatar-three">J</div>
+                            <div>
+                                <h4>Joel</h4>
+                                <span>Weekend regular</span>
+                            </div>
+                        </div>
+                        <p>“From the smooth checkout to the plating, everything feels carefully designed for a memorable meal.”</p>
+                    </article>
+                </div>
+
+                <form id="reviewForm" class="review-form">
+                    <div class="form-group">
+                        <label for="reviewName">Your Name</label>
+                        <input type="text" id="reviewName" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="reviewText">Your Review</label>
+                        <input type="text" id="reviewText" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-wide">Submit Review</button>
+                </form>
+                <div id="reviewList" class="review-list" aria-live="polite"></div>
+            </div>
+        </section>
+
+        <section class="tracking-section container">
+            <div class="section-heading center">
+                <p class="eyebrow eyebrow-red">Live updates</p>
+                <h2>Track your order</h2>
+            </div>
+            <form id="trackOrderForm" class="form-container tracking-form">
+                <div class="form-group">
+                    <label for="trackOrderNumber">Order Number</label>
+                    <input type="text" id="trackOrderNumber" placeholder="VH-202610010101010000" required>
+                </div>
+                <button type="submit" class="btn btn-primary btn-wide">Track Order</button>
+            </form>
+
+            <div id="trackingResult" class="tracking-card" aria-live="polite" hidden>
+                <div class="tracking-card-header">
+                    <div>
+                        <span class="tracking-eyebrow">LIVE ORDER UPDATES</span>
+                        <h3 id="trackingStatusLabel">Checking order…</h3>
+                    </div>
+                    <span id="mapStatusBadge" class="map-status-badge">Waiting</span>
+                </div>
+                <p id="trackingMessage" class="tracking-message">We’re checking the latest order update.</p>
+                <div class="tracking-progress-track" role="progressbar" aria-label="Order progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                    <div id="trackingProgress" class="tracking-progress-fill"></div>
+                </div>
+                <ol class="tracking-steps" id="trackingSteps">
+                    <li data-step="Pending"><span>1</span><strong>Received</strong><small>Order logged</small></li>
+                    <li data-step="Preparing"><span>2</span><strong>Preparing</strong><small>Kitchen is preparing</small></li>
+                    <li data-step="Out for Delivery"><span>3</span><strong>Dispatched</strong><small>Driver is on the way</small></li>
+                    <li data-step="Delivered"><span>4</span><strong>Delivered</strong><small>Order completed</small></li>
+                </ol>
+                <div class="tracking-meta">
+                    <span id="trackingUpdatedAt">Last update: —</span>
+                    <span id="trackingRefreshState">Updates every 10 seconds</span>
+                </div>
+            </div>
+
+            <div class="map-card tracking-map-card" id="trackingMapCard" hidden>
+                <div class="map-header">
+                    <div>
+                        <strong>Driver location</strong>
+                        <small id="driverMapCaption">Live location is shared when the driver enables GPS.</small>
+                    </div>
+                    <span id="driverLocationAge" class="map-status-badge">No signal</span>
+                </div>
+                <div id="trackingMap" aria-label="Map showing verified delivery destination and live driver location"></div>
+                <div class="map-footer">
+                    <span class="map-legend"><span class="legend-dot hotel-dot"></span>Verified destination</span>
+                    <span class="map-legend"><span class="legend-dot driver-dot"></span>Driver GPS</span>
+                    <span id="trackingEta" class="map-eta">ETA appears when the hotel provides one</span>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer id="contact" class="site-footer">
+        <div class="container footer-grid">
+            <div>
+                <a class="brand footer-brand" href="#top">
+                    <span class="brand-mark">V</span>
+                    <span>Vior Hotel</span>
+                </a>
+                <p>Crafted dining experiences rooted in Kenyan flavor, warm hospitality, and unforgettable comfort.</p>
+            </div>
+            <div>
+                <h4>Quick Links</h4>
+                <ul>
+                    <li><a href="#top">Home</a></li>
+                    <li><a href="#menu">Menu</a></li>
+                    <li><a href="#reviews">Reviews</a></li>
+                    <li><a href="/cart">Cart</a></li>
+                </ul>
+            </div>
+            <div>
+                <h4>Contact</h4>
+                <ul>
+                    <li>0703360356</li>
+                    <li>WhatsApp</li>
+                    <li>Instagram</li>
+                    <li>TikTok</li>
+                </ul>
+            </div>
+            <div>
+                <h4>Hours</h4>
+                <ul>
+                    <li>Mon–Fri: 6:00 AM – 10:00 PM</li>
+                    <li>Sat–Sun: 7:00 AM – 10:00 PM</li>
+                    <li>Delivery available</li>
+                </ul>
+            </div>
+            <div>
+                <h4>Map</h4>
+                <div class="map-placeholder" aria-label="Map placeholder">
+                    <span>Vior Hotel</span>
+                </div>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p>Made with love by Zaptruv Automation</p>
+            <p><em>Secure your order with M-Pesa. Click “Pay” at checkout to receive an STK Push.</em></p>
+        </div>
+    </footer>
+
+    <a href="https://wa.me/254703360356?text=Hello%20Vior%20Hotel%2C%20I%20would%20like%20to%20make%20an%20inquiry." class="whatsapp-float" target="_blank" rel="noopener noreferrer" aria-label="Chat on WhatsApp">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp" style="width: 28px; height: 28px;">
+    </a>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="/static/js/script.js"></script>
+</body>
+</html>

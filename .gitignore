@@ -1,0 +1,6 @@
+.env
+. env
+venv/
+__pycache__/
+*.py[cod]
+vior_hotel.db

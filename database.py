@@ -1,12 +1,24 @@
-import sqlite3
+import os
+import psycopg2
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def init_db():
-    conn = sqlite3.connect('vior_hotel.db')
+    # Get the database URL from environment variables
+    db_url = os.getenv('DATABASE_URL')
+    if not db_url:
+        print("Error: DATABASE_URL environment variable is missing.")
+        return
+
+    # Connect to the cloud database
+    conn = psycopg2.connect(db_url)
     cursor = conn.cursor()
-    # Users Table
+    
+    # Create tables (Postgres uses SERIAL instead of AUTOINCREMENT)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             fullname TEXT,
             dob TEXT,
             phone TEXT UNIQUE,
@@ -14,66 +26,29 @@ def init_db():
             customer_type TEXT
         )
     ''')
-    # Orders Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             order_number TEXT,
             customer_phone TEXT,
-            customer_name TEXT,
             order_type TEXT,
             delivery_time TEXT,
             amount REAL,
-            payment_method TEXT DEFAULT 'M-Pesa STK',
-            checkout_request_id TEXT,
-            delivery_address TEXT,
-            delivery_postal_code TEXT,
-            address_verified INTEGER DEFAULT 0,
-            delivery_latitude REAL,
-            delivery_longitude REAL,
-            driver_latitude REAL,
-            driver_longitude REAL,
-            driver_location_updated_at TEXT,
-            status_updated_at TEXT,
             status TEXT DEFAULT 'Pending'
         )
     ''')
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS order_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            order_id INTEGER NOT NULL,
-            item_name TEXT NOT NULL,
-            unit_price REAL NOT NULL,
-            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
-        )
-    ''')
-    columns = {row[1] for row in cursor.execute("PRAGMA table_info(orders)").fetchall()}
-    migrations = {
-        'customer_name': 'TEXT',
-        'delivery_address': 'TEXT',
-        'delivery_postal_code': 'TEXT',
-        'address_verified': 'INTEGER DEFAULT 0',
-        'delivery_latitude': 'REAL',
-        'delivery_longitude': 'REAL',
-        'driver_latitude': 'REAL',
-        'driver_longitude': 'REAL',
-        'driver_location_updated_at': 'TEXT',
-        'status_updated_at': 'TEXT',
-    }
-    for column, column_type in migrations.items():
-        if column not in columns:
-            cursor.execute(f"ALTER TABLE orders ADD COLUMN {column} {column_type}")
-    # Reviews Table
-    cursor.execute('''
         CREATE TABLE IF NOT EXISTS reviews (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             name TEXT,
             review TEXT
         )
     ''')
+    
     conn.commit()
+    cursor.close()
     conn.close()
-    print("Database created successfully!")
+    print("Cloud Database created successfully!")
 
 if __name__ == '__main__':
     init_db()

@@ -1,5 +1,6 @@
-Flask
+Flask==3.0.3
 Flask-Cors
 requests
 gunicorn
 python-dotenv
+psycopg2-binary

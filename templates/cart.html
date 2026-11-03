@@ -144,7 +144,7 @@
     </main>
 
     <a href="https://wa.me/254703360356?text=Hello%20Vior%20Hotel%2C%20I%20would%20like%20to%20make%20an%20inquiry." class="whatsapp-float" target="_blank" rel="noopener noreferrer" aria-label="Chat on WhatsApp">
-        <img src="https://upload.wikimedia.org/webp/logo/WhatsApp/gif/WhatsApp_logo_1.webp" alt="WhatsApp" style="width: 28px; height: 28px;">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp" style="width: 28px; height: 28px;">
     </a>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
@@ -194,6 +194,71 @@
             return total;
         }
 
+        function getDeliveryAddressPayload() {
+            const street = document.getElementById('deliveryStreet').value.trim();
+            const locality = document.getElementById('deliveryLocality').value.trim();
+            const region = document.getElementById('deliveryRegion').value.trim();
+            const country = document.getElementById('deliveryCountry').value.trim();
+            return {
+                delivery_address: [street, locality, region, country].filter(Boolean).join(' '),
+                delivery_locality: locality,
+                delivery_region: region,
+                delivery_postal_code: document.getElementById('deliveryPostalCode').value.trim(),
+                delivery_country: country,
+            };
+        }
+
+        function resetAddressVerification() {
+            verifiedAddress = null;
+            document.getElementById('confirmAddressGroup').hidden = true;
+            document.getElementById('confirmVerifiedAddress').checked = false;
+            document.getElementById('addressVerificationStatus').textContent = '';
+        }
+
+        document.getElementById('deliveryMethod').addEventListener('change', event => {
+            const onlineDelivery = event.target.value === 'Online';
+            document.getElementById('deliveryAddressGroup').hidden = !onlineDelivery;
+            document.getElementById('deliveryStatus').textContent = onlineDelivery
+                ? 'Verify the destination address and postal code before placing a delivery order.'
+                : '';
+            if (!onlineDelivery) resetAddressVerification();
+        });
+
+        ['deliveryStreet', 'deliveryLocality', 'deliveryRegion', 'deliveryPostalCode', 'deliveryCountry'].forEach(id => {
+            document.getElementById(id).addEventListener('input', resetAddressVerification);
+        });
+
+        document.getElementById('verifyAddressBtn').addEventListener('click', async event => {
+            const button = event.currentTarget;
+            const status = document.getElementById('addressVerificationStatus');
+            const address = getDeliveryAddressPayload();
+            if (!address.delivery_address || !address.delivery_postal_code || !address.delivery_country) {
+                status.textContent = 'Enter your street, town or city, postal code, and country.';
+                return;
+            }
+            button.disabled = true;
+            button.textContent = 'Verifying address…';
+            status.textContent = '';
+            try {
+                const response = await fetch('/api/address/verify', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(address),
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Address verification failed.');
+                verifiedAddress = data;
+                document.getElementById('confirmAddressGroup').hidden = false;
+                status.textContent = `Address and postal code verified: ${data.address} · ${data.postal_code}`;
+            } catch (error) {
+                resetAddressVerification();
+                status.textContent = error.message || 'Address verification failed. Please try again.';
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Verify address & postal code';
+            }
+        });
+
         async function processCheckout() {
             const total = loadCart();
             const phone = document.getElementById('mpesaPhone').value.trim();
@@ -217,7 +282,12 @@
                 if (!response.ok) throw new Error(data.error || data.errorMessage || 'Payment could not be started.');
                 if (data.ResponseCode === '0' || data.CheckoutRequestID) {
                     clearCheckoutCart();
-                    showOrderConfirmation(data.OrderNumber, 'M-Pesa prompt sent. Check your phone and enter your PIN to complete payment.');
+                    showOrderConfirmation(
+                        data.OrderNumber,
+                        data.Fallback
+                            ? `M-Pesa prompt is unavailable. Pay at Till ${data.TillNumber || '3484738'} and keep your order number.`
+                            : 'M-Pesa prompt sent. Check your phone and enter your PIN to complete payment.',
+                    );
                 } else {
                     throw new Error(data.errorMessage || data.CustomerMessage || 'M-Pesa could not start the payment.');
                 }

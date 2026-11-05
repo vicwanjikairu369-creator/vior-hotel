@@ -1500,6 +1500,121 @@ lottie-player {
     padding: 2rem;
 }
 
+.content-management-panel {
+    margin-top: 2rem;
+}
+
+.content-editor-form {
+    margin: 1.5rem 0 2.5rem;
+}
+
+.admin-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem 1.25rem;
+}
+
+.admin-form-wide {
+    grid-column: 1 / -1;
+}
+
+.admin-check {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0 0 1rem;
+}
+
+.media-upload-button {
+    margin-top: 0.65rem;
+}
+
+.media-upload-status {
+    display: block;
+    margin-top: 0.55rem;
+    color: var(--muted);
+}
+
+.managed-content-list {
+    display: grid;
+    gap: 0.8rem;
+}
+
+.managed-content-row {
+    display: grid;
+    grid-template-columns: 100px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.9rem;
+    border: 1px solid rgba(10,10,10,0.08);
+    border-radius: 14px;
+    background: #fff;
+}
+
+.managed-content-row > img,
+.managed-content-row > video {
+    width: 100px;
+    height: 75px;
+    border-radius: 9px;
+    object-fit: cover;
+    background: #111;
+}
+
+.managed-content-row p {
+    margin: 0.25rem 0;
+    color: var(--muted);
+}
+
+.stories-section {
+    padding: 4rem 0;
+    background: #fbf8f4;
+}
+
+.stories-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+    gap: 1.4rem;
+}
+
+.story-card {
+    overflow: hidden;
+    border: 1px solid rgba(10,10,10,0.08);
+    border-radius: 18px;
+    background: #fff;
+    box-shadow: 0 16px 38px rgba(30, 25, 20, 0.08);
+}
+
+.story-media {
+    display: block;
+    width: 100%;
+    max-height: 340px;
+    aspect-ratio: 16 / 10;
+    object-fit: cover;
+    background: #151515;
+}
+
+.story-copy {
+    padding: 1.2rem;
+}
+
+.story-copy h3 {
+    margin-bottom: 0.4rem;
+    font-family: 'Playfair Display', Georgia, serif;
+}
+
+.story-copy p {
+    margin-bottom: 1rem;
+    color: var(--muted);
+}
+
+.added-menu-card .food-image {
+    display: block;
+    width: 100%;
+    height: 180px;
+    object-fit: cover;
+    background: #151515;
+}
+
 .table-wrap {
     overflow-x: auto;
     margin-top: 1.25rem;
@@ -1550,6 +1665,30 @@ lottie-player {
     align-items: center;
     gap: 0.55rem;
     flex-wrap: wrap;
+}
+
+@media (max-width: 760px) {
+    .admin-form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .admin-form-wide {
+        grid-column: auto;
+    }
+
+    .managed-content-row {
+        grid-template-columns: 76px minmax(0, 1fr);
+    }
+
+    .managed-content-row > img,
+    .managed-content-row > video {
+        width: 76px;
+        height: 66px;
+    }
+
+    .managed-content-row form {
+        grid-column: 2;
+    }
 }
 
 .status-pill {

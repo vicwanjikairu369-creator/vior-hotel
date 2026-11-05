@@ -18,6 +18,8 @@
             </a>
             <nav class="main-nav" aria-label="Admin navigation">
                 <span class="nav-welcome">Admin Dashboard</span>
+                <a href="#story-management">Stories</a>
+                <a href="#menu-management">Menu</a>
                 <a href="{{ url_for('logout') }}">Logout</a>
             </nav>
         </div>
@@ -109,6 +111,141 @@
                 </table>
             </div>
         </section>
+
+        <section class="admin-panel content-management-panel" id="story-management">
+            <div class="section-heading left">
+                <p class="eyebrow eyebrow-red">Marketing</p>
+                <h2>Stories, offers &amp; media</h2>
+                <p>Publish website stories with Cloudinary-hosted images or videos. Scheduled stories appear only during their publication dates.</p>
+            </div>
+            <form class="content-editor-form" action="{{ url_for('save_admin_story') }}" method="POST" data-media-form>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="media_url" value="">
+                <input type="hidden" name="media_type" value="image">
+                <div class="admin-form-grid">
+                    <div class="form-group">
+                        <label for="storyTitle">Story title</label>
+                        <input id="storyTitle" name="title" maxlength="100" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="storyMedia">Story image or video</label>
+                        <input id="storyMedia" type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm" data-media-input required>
+                        <button class="btn btn-secondary media-upload-button" type="button" data-upload-button>Upload media</button>
+                        <small class="media-upload-status" data-upload-status role="status">Choose an image or video, then upload it.</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="storyCaption">Caption</label>
+                        <textarea id="storyCaption" name="caption" rows="3" maxlength="1000" required></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="storyStarts">Publish from</label>
+                        <input id="storyStarts" type="date" name="starts_at">
+                    </div>
+                    <div class="form-group">
+                        <label for="storyEnds">Publish until</label>
+                        <input id="storyEnds" type="date" name="ends_at">
+                    </div>
+                    <div class="form-group">
+                        <label for="storyButtonText">Optional button label</label>
+                        <input id="storyButtonText" name="button_text" maxlength="40" placeholder="Order now">
+                    </div>
+                    <div class="form-group">
+                        <label for="storyButtonUrl">Optional button destination</label>
+                        <input id="storyButtonUrl" type="url" name="button_url" placeholder="https://...">
+                    </div>
+                </div>
+                <label class="admin-check"><input type="checkbox" name="published" checked> Publish this story when saved</label>
+                <button class="btn btn-primary" type="submit">Save story</button>
+            </form>
+
+            <div class="managed-content-list">
+                <h3>Saved stories</h3>
+                {% for story in stories %}
+                <article class="managed-content-row">
+                    {% if story.media_type == 'video' %}
+                    <video src="{{ story.media_url }}" controls preload="metadata"></video>
+                    {% else %}
+                    <img src="{{ story.media_url }}" alt="" loading="lazy">
+                    {% endif %}
+                    <div>
+                        <strong>{{ story.title }}</strong>
+                        <p>{{ story.caption }}</p>
+                        <small>{{ 'Published' if story.published else 'Draft / hidden' }}</small>
+                    </div>
+                    <form action="{{ url_for('toggle_admin_story', story_id=story.id) }}" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <input type="hidden" name="published" value="{{ 'false' if story.published else 'true' }}">
+                        <button class="btn btn-secondary" type="submit">{{ 'Hide' if story.published else 'Publish' }}</button>
+                    </form>
+                </article>
+                {% else %}
+                <p>No stories yet.</p>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="admin-panel content-management-panel" id="menu-management">
+            <div class="section-heading left">
+                <p class="eyebrow eyebrow-red">Menu</p>
+                <h2>Add or update a dish</h2>
+                <p>New dishes are stored in the database, shown on the public menu, and priced by the server at checkout. Reuse an existing added-dish name to update it.</p>
+            </div>
+            <form class="content-editor-form" action="{{ url_for('save_admin_menu_item') }}" method="POST" data-media-form>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="media_url" value="">
+                <input type="hidden" name="media_type" value="image">
+                <div class="admin-form-grid">
+                    <div class="form-group">
+                        <label for="dishName">Dish name</label>
+                        <input id="dishName" name="name" maxlength="80" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="dishPrice">Price (KES)</label>
+                        <input id="dishPrice" type="number" name="price" min="1" max="1000000" step="1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="dishCategory">Category</label>
+                        <input id="dishCategory" name="category" maxlength="50" placeholder="Breakfast, lunch, drinks..." required>
+                    </div>
+                    <div class="form-group">
+                        <label for="dishMedia">Dish image or video</label>
+                        <input id="dishMedia" type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm" data-media-input required>
+                        <button class="btn btn-secondary media-upload-button" type="button" data-upload-button>Upload media</button>
+                        <small class="media-upload-status" data-upload-status role="status">Choose an image or video, then upload it.</small>
+                    </div>
+                    <div class="form-group admin-form-wide">
+                        <label for="dishDescription">Description</label>
+                        <textarea id="dishDescription" name="description" rows="3" maxlength="500" required></textarea>
+                    </div>
+                </div>
+                <button class="btn btn-primary" type="submit">Save dish</button>
+            </form>
+
+            <div class="managed-content-list">
+                <h3>Added dishes</h3>
+                {% for item in menu_items %}
+                <article class="managed-content-row">
+                    {% if item.media_type == 'video' %}
+                    <video src="{{ item.media_url }}" controls preload="metadata"></video>
+                    {% else %}
+                    <img src="{{ item.media_url }}" alt="" loading="lazy">
+                    {% endif %}
+                    <div>
+                        <strong>{{ item.name }} · KES {{ item.price }}</strong>
+                        <p>{{ item.category }} · {{ item.description }}</p>
+                        <small>{{ 'Available' if item.active else 'Hidden from menu' }}</small>
+                    </div>
+                    <form action="{{ url_for('toggle_admin_menu_item', item_id=item.id) }}" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <input type="hidden" name="active" value="{{ 'false' if item.active else 'true' }}">
+                        <button class="btn btn-secondary" type="submit">{{ 'Hide' if item.active else 'Show' }}</button>
+                    </form>
+                </article>
+                {% else %}
+                <p>No additional dishes yet.</p>
+                {% endfor %}
+            </div>
+        </section>
     </main>
 
     <a href="https://wa.me/254703360356?text=Hello%20Vior%20Hotel%2C%20I%20would%20like%20to%20make%20an%20inquiry." class="whatsapp-float" target="_blank" rel="noopener noreferrer" aria-label="Chat on WhatsApp">
@@ -164,5 +301,6 @@
             });
         });
     </script>
+    <script src="{{ url_for('static', filename='js/admin.js') }}" defer></script>
 </body>
 </html>

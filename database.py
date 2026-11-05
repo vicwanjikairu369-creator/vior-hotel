@@ -86,6 +86,34 @@ _SQLITE_SCHEMA = (
         updated_at TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS menu_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT NOT NULL,
+        category TEXT NOT NULL,
+        price INTEGER NOT NULL,
+        media_url TEXT NOT NULL,
+        media_type TEXT NOT NULL DEFAULT 'image',
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS stories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        caption TEXT NOT NULL,
+        media_url TEXT NOT NULL,
+        media_type TEXT NOT NULL,
+        button_text TEXT,
+        button_url TEXT,
+        published INTEGER NOT NULL DEFAULT 0,
+        starts_at TEXT,
+        ends_at TEXT,
+        created_at TEXT NOT NULL
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_otp_phone_created_at ON otp_challenges (phone, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_otp_ip_created_at ON otp_challenges (request_ip, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_payments_order_number ON payments (order_number)",
@@ -166,6 +194,34 @@ _POSTGRES_SCHEMA = (
         updated_at TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS menu_items (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT NOT NULL,
+        category TEXT NOT NULL,
+        price INTEGER NOT NULL,
+        media_url TEXT NOT NULL,
+        media_type TEXT NOT NULL DEFAULT 'image',
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS stories (
+        id SERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        caption TEXT NOT NULL,
+        media_url TEXT NOT NULL,
+        media_type TEXT NOT NULL,
+        button_text TEXT,
+        button_url TEXT,
+        published BOOLEAN NOT NULL DEFAULT FALSE,
+        starts_at TEXT,
+        ends_at TEXT,
+        created_at TEXT NOT NULL
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_otp_phone_created_at ON otp_challenges (phone, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_otp_ip_created_at ON otp_challenges (request_ip, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_payments_order_number ON payments (order_number)",
@@ -206,6 +262,28 @@ _MIGRATIONS = {
         "name": "TEXT",
         "review": "TEXT",
     },
+    "menu_items": {
+        "name": "TEXT",
+        "description": "TEXT",
+        "category": "TEXT",
+        "price": "INTEGER",
+        "media_url": "TEXT",
+        "media_type": "TEXT NOT NULL DEFAULT 'image'",
+        "active": "BOOLEAN NOT NULL DEFAULT TRUE",
+        "created_at": "TEXT",
+    },
+    "stories": {
+        "title": "TEXT",
+        "caption": "TEXT",
+        "media_url": "TEXT",
+        "media_type": "TEXT",
+        "button_text": "TEXT",
+        "button_url": "TEXT",
+        "published": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "starts_at": "TEXT",
+        "ends_at": "TEXT",
+        "created_at": "TEXT",
+    },
 }
 
 
@@ -235,6 +313,7 @@ def _create_or_migrate_schema(connection):
             for column, column_type in columns.items():
                 if column not in existing:
                     sqlite_type = column_type.replace("BOOLEAN NOT NULL DEFAULT FALSE", "INTEGER NOT NULL DEFAULT 0")
+                    sqlite_type = sqlite_type.replace("BOOLEAN NOT NULL DEFAULT TRUE", "INTEGER NOT NULL DEFAULT 1")
                     sqlite_type = sqlite_type.replace("DOUBLE PRECISION", "REAL")
                     cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {sqlite_type}")
         cursor.execute(

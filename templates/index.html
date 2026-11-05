@@ -43,7 +43,7 @@
             <div class="hero-backdrop"></div>
             <div class="container hero-inner">
                 <div class="hero-copy">
-                    <p class="eyebrow">Kenyan fine dining • crafted daily</p>
+                    <p class="eyebrow">Time for Food · Kenyan fine dining, crafted daily</p>
                     <h1>Vior Hotel</h1>
                     <p class="hero-text">Bold Kenyan comfort food, thoughtfully prepared and served in a refined, welcoming space.</p>
                     <div class="hero-actions">
@@ -68,6 +68,37 @@
                 </aside>
             </div>
         </section>
+
+        {% if stories %}
+        <section class="stories-section" aria-label="Vior Hotel stories and offers">
+            <div class="container">
+                <div class="section-heading">
+                    <p class="eyebrow eyebrow-red">From Vior Hotel</p>
+                    <h2>Stories, specials &amp; offers.</h2>
+                </div>
+                <div class="stories-grid">
+                    {% for story in stories %}
+                    <article class="story-card">
+                        {% if story.media_type == 'video' %}
+                        <video class="story-media" controls playsinline preload="metadata">
+                            <source src="{{ story.media_url }}">
+                        </video>
+                        {% else %}
+                        <img class="story-media" src="{{ story.media_url }}" alt="{{ story.title }}" loading="lazy">
+                        {% endif %}
+                        <div class="story-copy">
+                            <h3>{{ story.title }}</h3>
+                            <p>{{ story.caption }}</p>
+                            {% if story.button_text and story.button_url %}
+                            <a class="btn btn-primary" href="{{ story.button_url }}">{{ story.button_text }}</a>
+                            {% endif %}
+                        </div>
+                    </article>
+                    {% endfor %}
+                </div>
+            </div>
+        </section>
+        {% endif %}
 
         <section id="experience" class="experience-strip">
             <div class="container experience-grid">
@@ -462,6 +493,35 @@
                         </article>
                     </div>
                 </div>
+                {% if added_menu_items %}
+                <div class="menu-category">
+                    <h3>New at Vior</h3>
+                    <div class="menu-grid">
+                        {% for item in added_menu_items %}
+                        <article class="menu-card added-menu-card">
+                            <div class="menu-visual">
+                                {% if item.media_type == 'video' %}
+                                <video class="food-image" controls playsinline preload="metadata">
+                                    <source src="{{ item.media_url }}">
+                                </video>
+                                {% else %}
+                                <img class="food-image" src="{{ item.media_url }}" alt="{{ item.name }}" loading="lazy">
+                                {% endif %}
+                                <div class="menu-overlay">
+                                    <span>{{ item.category }}</span>
+                                    <strong>KES {{ item.price }}</strong>
+                                </div>
+                            </div>
+                            <div class="menu-copy">
+                                <h4>{{ item.name }}</h4>
+                                <p>{{ item.description }}</p>
+                            </div>
+                            <button class="btn" onclick="addToCart({{ item.name|tojson }}, {{ item.price }})">Add to Cart</button>
+                        </article>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
             </div>
         </section>
 

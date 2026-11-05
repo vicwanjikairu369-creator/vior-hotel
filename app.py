@@ -1,4 +1,5 @@
 import hmac
+import hashlib
 import json
 import logging
 import os
@@ -94,9 +95,19 @@ def _order_items(data):
         if not isinstance(item, dict):
             raise ValueError("The order contains an invalid menu item.")
         name = item.get("name")
-        if not isinstance(name, str) or name not in MENU_PRICES:
+        if not isinstance(name, str):
             raise ValueError(f"{name or 'An item'} is not on the current menu.")
-        trusted_items.append({"name": name, "price": MENU_PRICES[name]})
+        added_item = query_db(
+            "SELECT name, price FROM menu_items WHERE name = %s AND active = %s",
+            (name, True),
+            one=True,
+        )
+        if added_item:
+            trusted_items.append({"name": added_item["name"], "price": int(added_item["price"])})
+        elif name in MENU_PRICES:
+            trusted_items.append({"name": name, "price": MENU_PRICES[name]})
+        else:
+            raise ValueError(f"{name or 'An item'} is not on the current menu.")
     return trusted_items
 
 
@@ -251,6 +262,30 @@ def _valid_csrf_token():
     return bool(csrf_token) and hmac.compare_digest(
         str(request.form.get("csrf_token") or ""), csrf_token
     )
+
+
+def _cloudinary_credentials():
+    return (
+        os.getenv("CLOUDINARY_CLOUD_NAME"),
+        os.getenv("CLOUDINARY_API_KEY"),
+        os.getenv("CLOUDINARY_API_SECRET"),
+    )
+
+
+def _cloudinary_signature(params, api_secret):
+    signed_values = "&".join(
+        f"{key}={value}" for key, value in sorted(params.items()) if value is not None
+    )
+    return hashlib.sha1(f"{signed_values}{api_secret}".encode()).hexdigest()
+
+
+def _valid_cloudinary_media_url(value, resource_type, section):
+    cloud_name, _, _ = _cloudinary_credentials()
+    parsed = urlparse(value)
+    if not cloud_name or parsed.scheme != "https" or parsed.netloc != "res.cloudinary.com":
+        return False
+    expected_prefix = f"/{cloud_name}/{resource_type}/upload/vior-hotel/{section}/"
+    return parsed.path.startswith(expected_prefix)
 
 
 def _otp_code_hash(challenge_id, phone, code):
@@ -609,7 +644,32 @@ def _json_data():
 @app.route("/", endpoint="index")
 def home():
     session.setdefault("cart_id", secrets.token_urlsafe(12))
-    return render_template("index.html", menu_items=MENU_ITEMS)
+    added_menu_items = query_db(
+        "SELECT id, name, description, category, price, media_url, media_type "
+        "FROM menu_items WHERE active = %s ORDER BY id DESC",
+        (True,),
+    )
+    menu_items = MENU_ITEMS + [
+        {"name": item["name"], "price": item["price"]} for item in added_menu_items
+    ]
+    now = datetime.now(timezone.utc).isoformat()
+    stories = query_db(
+        """
+        SELECT id, title, caption, media_url, media_type, button_text, button_url
+        FROM stories
+        WHERE published = %s
+          AND (starts_at IS NULL OR starts_at <= %s)
+          AND (ends_at IS NULL OR ends_at >= %s)
+        ORDER BY id DESC
+        """,
+        (True, now, now),
+    )
+    return render_template(
+        "index.html",
+        menu_items=menu_items,
+        added_menu_items=added_menu_items,
+        stories=stories,
+    )
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -728,6 +788,13 @@ def customer_login():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
+        csrf_token = session.get("csrf_token")
+        if not csrf_token or not _valid_csrf_token():
+            return render_template(
+                "login.html",
+                error="Please refresh the page and try again.",
+                csrf_token=session.setdefault("csrf_token", secrets.token_urlsafe(32)),
+            ), 400
         configured_phone = _normalize_phone(os.getenv("ADMIN_PHONE"))
         submitted_phone = _normalize_phone(request.form.get("phone"))
         configured_password = os.getenv("ADMIN_PASSWORD")
@@ -741,8 +808,12 @@ def login():
             session.clear()
             session["is_admin"] = True
             return redirect(url_for("admin_dashboard"))
-        return render_template("login.html", error="Staff sign in is unavailable or the credentials are incorrect."), 401
-    return render_template("login.html")
+        return render_template(
+            "login.html",
+            error="Staff sign in is unavailable or the credentials are incorrect.",
+            csrf_token=csrf_token,
+        ), 401
+    return render_template("login.html", csrf_token=session.setdefault("csrf_token", secrets.token_urlsafe(32)))
 
 
 @app.route("/logout")
@@ -772,7 +843,188 @@ def admin_dashboard():
         except (TypeError, ValueError, KeyError):
             app.logger.exception("Could not decode items for order %s", order.get("order_number"))
             order["items"] = "Order details unavailable"
-    return render_template("admin.html", orders=orders, csrf_token=csrf_token)
+    menu_items = query_db("SELECT * FROM menu_items ORDER BY id DESC")
+    stories = query_db("SELECT * FROM stories ORDER BY id DESC")
+    return render_template(
+        "admin.html",
+        orders=orders,
+        menu_items=menu_items,
+        stories=stories,
+        csrf_token=csrf_token,
+    )
+
+
+@app.route("/api/admin/media-signature", methods=["POST"])
+def admin_media_signature():
+    if not _is_admin():
+        return jsonify({"error": "Staff sign-in is required."}), 401
+    data = _json_data()
+    if not data:
+        return jsonify({"error": "A media upload request is required."}), 400
+    csrf_token = session.get("csrf_token")
+    submitted_csrf = str(data.get("csrf_token") or "")
+    if not csrf_token or not hmac.compare_digest(submitted_csrf, csrf_token):
+        return jsonify({"error": "Refresh the page and try again."}), 400
+    cloud_name, api_key, api_secret = _cloudinary_credentials()
+    if not cloud_name or not api_key or not api_secret:
+        return jsonify({"error": "Cloudinary uploads are not configured. Contact the site owner."}), 503
+
+    section = data.get("section")
+    media_type = data.get("media_type")
+    if section not in {"menu", "stories"} or media_type not in {"image", "video"}:
+        return jsonify({"error": "Choose a valid upload type."}), 400
+    folder = f"vior-hotel/{section}"
+    allowed_formats = "jpg,jpeg,png,webp" if media_type == "image" else "mp4,mov,webm"
+    params = {
+        "allowed_formats": allowed_formats,
+        "folder": folder,
+        "public_id": secrets.token_hex(16),
+        "timestamp": str(int(datetime.now(timezone.utc).timestamp())),
+    }
+    return jsonify({
+        **params,
+        "api_key": api_key,
+        "cloud_name": cloud_name,
+        "resource_type": media_type,
+        "signature": _cloudinary_signature(params, api_secret),
+    })
+
+
+@app.route("/admin/menu", methods=["POST"])
+def save_admin_menu_item():
+    if not _is_admin():
+        return redirect(url_for("login"))
+    if not _valid_csrf_token():
+        return "Please refresh the page and try again.", 400
+    name = str(request.form.get("name") or "").strip()
+    description = str(request.form.get("description") or "").strip()
+    category = str(request.form.get("category") or "").strip()
+    media_type = str(request.form.get("media_type") or "")
+    media_url = str(request.form.get("media_url") or "").strip()
+    try:
+        price = int(request.form.get("price") or "")
+    except ValueError:
+        return "Enter a whole-number price in KES.", 400
+    if (
+        len(name) < 2 or len(name) > 80
+        or not description or len(description) > 500
+        or not category or len(category) > 50
+        or price < 1 or price > 1_000_000
+    ):
+        return "Check the dish name, description, category, and price.", 400
+    if name in MENU_PRICES:
+        return "That dish already exists on the current menu.", 409
+    if media_type not in {"image", "video"} or not _valid_cloudinary_media_url(media_url, media_type, "menu"):
+        return "Upload a dish image or video using the provided media uploader.", 400
+
+    existing = query_db("SELECT id FROM menu_items WHERE name = %s", (name,), one=True)
+    now = datetime.now(timezone.utc).isoformat()
+    if existing:
+        query_db(
+            """
+            UPDATE menu_items SET description = %s, category = %s, price = %s,
+                media_url = %s, media_type = %s, active = %s WHERE id = %s
+            """,
+            (description, category, price, media_url, media_type, True, existing["id"]),
+        )
+    else:
+        query_db(
+            """
+            INSERT INTO menu_items
+                (name, description, category, price, media_url, media_type, active, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (name, description, category, price, media_url, media_type, True, now),
+        )
+    return redirect(url_for("admin_dashboard") + "#menu-management")
+
+
+@app.route("/admin/menu/<int:item_id>/availability", methods=["POST"])
+def toggle_admin_menu_item(item_id):
+    if not _is_admin():
+        return redirect(url_for("login"))
+    if not _valid_csrf_token():
+        return "Please refresh the page and try again.", 400
+    active = request.form.get("active") == "true"
+    changed = query_db(
+        "UPDATE menu_items SET active = %s WHERE id = %s",
+        (active, item_id),
+    )
+    if changed != 1:
+        return "Dish not found.", 404
+    return redirect(url_for("admin_dashboard") + "#menu-management")
+
+
+@app.route("/admin/stories", methods=["POST"])
+def save_admin_story():
+    if not _is_admin():
+        return redirect(url_for("login"))
+    if not _valid_csrf_token():
+        return "Please refresh the page and try again.", 400
+    title = str(request.form.get("title") or "").strip()
+    caption = str(request.form.get("caption") or "").strip()
+    media_type = str(request.form.get("media_type") or "")
+    media_url = str(request.form.get("media_url") or "").strip()
+    button_text = str(request.form.get("button_text") or "").strip()
+    button_url = str(request.form.get("button_url") or "").strip()
+    starts_at = str(request.form.get("starts_at") or "").strip() or None
+    ends_at = str(request.form.get("ends_at") or "").strip() or None
+    published = request.form.get("published") == "on"
+
+    if len(title) < 2 or len(title) > 100 or not caption or len(caption) > 1000:
+        return "Enter a story title and a caption of up to 1,000 characters.", 400
+    if media_type not in {"image", "video"} or not _valid_cloudinary_media_url(media_url, media_type, "stories"):
+        return "Upload a story image or video using the provided media uploader.", 400
+    if bool(button_text) != bool(button_url) or len(button_text) > 40:
+        return "Provide both a short button label and its destination, or leave both blank.", 400
+    if button_url:
+        destination = urlparse(button_url)
+        if destination.scheme not in {"http", "https"} or not destination.netloc:
+            return "The story button destination must be an absolute HTTP or HTTPS URL.", 400
+    try:
+        if starts_at:
+            starts_at = datetime.strptime(starts_at, "%Y-%m-%d").replace(
+                tzinfo=timezone.utc
+            ).isoformat()
+        if ends_at:
+            ends_at = datetime.strptime(ends_at, "%Y-%m-%d").replace(
+                hour=23, minute=59, second=59, tzinfo=timezone.utc
+            ).isoformat()
+        if starts_at and ends_at and ends_at < starts_at:
+            return "The story end date must be on or after its start date.", 400
+    except ValueError:
+        return "Enter valid story publication dates.", 400
+
+    query_db(
+        """
+        INSERT INTO stories
+            (title, caption, media_url, media_type, button_text, button_url,
+             published, starts_at, ends_at, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            title, caption, media_url, media_type, button_text or None,
+            button_url or None, published, starts_at, ends_at,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+    return redirect(url_for("admin_dashboard") + "#story-management")
+
+
+@app.route("/admin/stories/<int:story_id>/availability", methods=["POST"])
+def toggle_admin_story(story_id):
+    if not _is_admin():
+        return redirect(url_for("login"))
+    if not _valid_csrf_token():
+        return "Please refresh the page and try again.", 400
+    published = request.form.get("published") == "true"
+    changed = query_db(
+        "UPDATE stories SET published = %s WHERE id = %s",
+        (published, story_id),
+    )
+    if changed != 1:
+        return "Story not found.", 404
+    return redirect(url_for("admin_dashboard") + "#story-management")
 
 
 @app.route("/admin/order/<int:order_id>/status", methods=["POST"], endpoint="update_order_status")

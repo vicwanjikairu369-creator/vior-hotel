@@ -112,25 +112,34 @@ def test_mpesa_rejects_items_not_on_the_current_menu(client):
     assert 'not on the current menu' in response.get_json()['error']
 
 
-def test_staff_login_opens_admin_dashboard(client, monkeypatch):
+def _staff_login(client, monkeypatch):
     monkeypatch.setenv('ADMIN_PHONE', '254700000000')
     monkeypatch.setenv('ADMIN_PASSWORD', 'test-password')
+    client.get('/login')
+    with client.session_transaction() as sess:
+        csrf_token = sess['csrf_token']
     response = client.post(
         '/login',
-        data={'phone': '0700000000', 'admin_password': 'test-password'},
+        data={
+            'phone': '0700000000',
+            'admin_password': 'test-password',
+            'csrf_token': csrf_token,
+        },
     )
+    if response.status_code == 302:
+        client.get('/admin')
+    return response
+
+
+def test_staff_login_opens_admin_dashboard(client, monkeypatch):
+    response = _staff_login(client, monkeypatch)
     assert response.status_code == 302
     assert response.headers['Location'].endswith('/admin')
     assert client.get('/admin').status_code == 200
 
 
 def test_admin_order_status_requires_csrf_token(client, monkeypatch):
-    monkeypatch.setenv('ADMIN_PHONE', '254700000000')
-    monkeypatch.setenv('ADMIN_PASSWORD', 'test-password')
-    client.post(
-        '/login',
-        data={'phone': '0700000000', 'admin_password': 'test-password'},
-    )
+    _staff_login(client, monkeypatch)
     order = client.post(
         '/api/mpesa/till-order',
         json={
@@ -175,6 +184,76 @@ def test_admin_order_status_requires_csrf_token(client, monkeypatch):
         (order['order_number'],),
         one=True,
     ) == {'status': 'Completed', 'provider_status': 'Verified by staff'}
+
+
+def test_admin_can_publish_cloudinary_dish_and_story(client, monkeypatch):
+    monkeypatch.setenv('ADMIN_PHONE', '254700000000')
+    monkeypatch.setenv('ADMIN_PASSWORD', 'test-password')
+    monkeypatch.setenv('CLOUDINARY_CLOUD_NAME', 'vior-test')
+    monkeypatch.setenv('CLOUDINARY_API_KEY', 'public-test-key')
+    monkeypatch.setenv('CLOUDINARY_API_SECRET', 'private-test-secret')
+    _staff_login(client, monkeypatch)
+    with client.session_transaction() as sess:
+        csrf_token = sess['csrf_token']
+
+    signature = client.post(
+        '/api/admin/media-signature',
+        json={'csrf_token': csrf_token, 'section': 'menu', 'media_type': 'image'},
+    )
+    assert signature.status_code == 200
+    assert 'api_secret' not in signature.get_json()
+    assert signature.get_json()['folder'] == 'vior-hotel/menu'
+
+    dish = client.post(
+        '/admin/menu',
+        data={
+            'csrf_token': csrf_token,
+            'name': 'Test Special',
+            'description': 'A test dish',
+            'category': 'Lunch',
+            'price': '275',
+            'media_type': 'image',
+            'media_url': 'https://res.cloudinary.com/vior-test/image/upload/vior-hotel/menu/test.jpg',
+        },
+    )
+    assert dish.status_code == 302
+    homepage = client.get('/')
+    assert b'Test Special' in homepage.data
+    assert b'Ugali Beef Stew' in homepage.data
+
+    order = client.post(
+        '/api/mpesa/till-order',
+        json={
+            'items': [{'name': 'Test Special', 'price': 1}],
+            'phone': '0712345678',
+            'order_type': 'Pickup',
+        },
+        headers={'Idempotency-Key': 'checkout-added-dish-001'},
+    )
+    assert order.status_code == 201
+    assert order.get_json()['amount'] == 275
+
+    story = client.post(
+        '/admin/stories',
+        data={
+            'csrf_token': csrf_token,
+            'title': 'Weekend special',
+            'caption': 'A new story',
+            'media_type': 'video',
+            'media_url': 'https://res.cloudinary.com/vior-test/video/upload/vior-hotel/stories/test.mp4',
+            'published': 'on',
+        },
+    )
+    assert story.status_code == 302
+    assert b'Weekend special' in client.get('/').data
+
+
+def test_admin_media_upload_needs_login_and_csrf(client):
+    unauthorized = client.post(
+        '/api/admin/media-signature',
+        json={'section': 'stories', 'media_type': 'image'},
+    )
+    assert unauthorized.status_code == 401
 
 
 def test_new_order_number_has_unpredictable_suffix(client):

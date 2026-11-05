@@ -31,6 +31,7 @@
 
                 {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
                 <form action="/login" method="POST" class="register-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <div class="form-group">
                         <label for="phone">Staff phone number</label>
                         <input id="phone" type="tel" name="phone" autocomplete="username" placeholder="07XXXXXXXX" required>

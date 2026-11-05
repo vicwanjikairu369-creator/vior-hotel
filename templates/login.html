@@ -27,7 +27,7 @@
             <div class="register-form-wrap">
                 <p class="register-kicker">Secure sign in</p>
                 <h2>Operations access</h2>
-                <p class="register-intro">Use your staff phone number and admin password to manage order flow and delivery status.</p>
+                <p class="register-intro">Sign in with the phone number and password issued by your hotel owner.</p>
 
                 {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
                 <form action="/login" method="POST" class="register-form">
@@ -37,8 +37,8 @@
                         <input id="phone" type="tel" name="phone" autocomplete="username" placeholder="07XXXXXXXX" required>
                     </div>
                     <div class="form-group">
-                        <label for="admin_password">Admin password</label>
-                        <input id="admin_password" type="password" name="admin_password" autocomplete="current-password" placeholder="Enter admin password" required>
+                        <label for="staff_password">Staff password</label>
+                        <input id="staff_password" type="password" name="staff_password" autocomplete="current-password" placeholder="Enter your staff password" required>
                     </div>
                     <button type="submit" class="register-submit">Access dashboard <span aria-hidden="true">↗</span></button>
                 </form>

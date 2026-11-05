@@ -3,6 +3,7 @@ import sqlite3
 from unittest.mock import Mock, patch
 
 import pytest
+from werkzeug.security import generate_password_hash
 
 from app import app
 import database
@@ -118,6 +119,23 @@ def test_mpesa_rejects_items_not_on_the_current_menu(client):
 def _staff_login(client, monkeypatch):
     monkeypatch.setenv('ADMIN_PHONE', '254700000000')
     monkeypatch.setenv('ADMIN_PASSWORD', 'test-password')
+    if not database.query_db(
+        'SELECT id FROM staff_accounts WHERE phone = %s',
+        ('254700000000',),
+        one=True,
+    ):
+        database.query_db(
+            'INSERT INTO staff_accounts (fullname, phone, password_hash, role, active, created_at) '
+            'VALUES (%s, %s, %s, %s, %s, %s)',
+            (
+                'Test Owner',
+                '254700000000',
+                generate_password_hash('test-password'),
+                'owner',
+                True,
+                '2026-11-05T07:00:00+00:00',
+            ),
+        )
     client.get('/login')
     with client.session_transaction() as sess:
         csrf_token = sess['csrf_token']
@@ -125,7 +143,7 @@ def _staff_login(client, monkeypatch):
         '/login',
         data={
             'phone': '0700000000',
-            'admin_password': 'test-password',
+            'staff_password': 'test-password',
             'csrf_token': csrf_token,
         },
     )
@@ -211,8 +229,28 @@ def test_first_staff_setup_creates_one_owner_then_closes(client, monkeypatch):
     assert client.get('/staff/setup').status_code == 404
 
 
-def test_first_staff_setup_requires_private_token_and_is_disabled_with_admin_env(client, monkeypatch):
+def test_legacy_admin_credentials_do_not_bypass_staff_login(client, monkeypatch):
+    monkeypatch.setenv('ADMIN_PHONE', '254700000000')
+    monkeypatch.setenv('ADMIN_PASSWORD', 'test-password')
+    client.get('/login')
+    with client.session_transaction() as sess:
+        csrf_token = sess['csrf_token']
+    failed = client.post(
+        '/login',
+        data={
+            'phone': '0700000000',
+            'staff_password': 'test-password',
+            'csrf_token': csrf_token,
+        },
+    )
+    assert failed.status_code == 401
+    assert database.query_db('SELECT COUNT(*) AS total FROM staff_accounts', one=True)['total'] == 0
+
+
+def test_first_staff_setup_requires_private_token_even_with_legacy_admin_env(client, monkeypatch):
     monkeypatch.setenv('STAFF_SETUP_TOKEN', 'a-secure-one-time-token-with-more-than-32-characters')
+    monkeypatch.setenv('ADMIN_PHONE', '254700000000')
+    monkeypatch.setenv('ADMIN_PASSWORD', 'existing-admin-password')
     client.get('/staff/setup')
     with client.session_transaction() as sess:
         csrf_token = sess['csrf_token']
@@ -230,9 +268,7 @@ def test_first_staff_setup_requires_private_token_and_is_disabled_with_admin_env
     assert failed.status_code == 401
     assert database.query_db('SELECT COUNT(*) AS total FROM staff_accounts', one=True)['total'] == 0
 
-    monkeypatch.setenv('ADMIN_PHONE', '254700000000')
-    monkeypatch.setenv('ADMIN_PASSWORD', 'existing-admin-password')
-    assert client.get('/staff/setup').status_code == 404
+    assert client.get('/staff/setup').status_code == 200
 
 
 def test_existing_database_migration_adds_order_created_at(tmp_path):

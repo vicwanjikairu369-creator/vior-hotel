@@ -314,7 +314,7 @@ def _has_permission(permission):
 
 def _staff_setup_available():
     setup_token = os.getenv("STAFF_SETUP_TOKEN", "")
-    if len(setup_token) < 32 or os.getenv("ADMIN_PHONE") or os.getenv("ADMIN_PASSWORD"):
+    if len(setup_token) < 32:
         return False
     if query_db("SELECT id FROM staff_setup WHERE id = %s", (1,), one=True):
         return False
@@ -1159,16 +1159,8 @@ def login():
                 csrf_token=session.get("csrf_token"),
                 staff_setup_available=_staff_setup_available(),
             ), 429
-        configured_phone = _normalize_phone(os.getenv("ADMIN_PHONE"))
         submitted_phone = _normalize_phone(request.form.get("phone"))
-        configured_password = os.getenv("ADMIN_PASSWORD")
-        submitted_password = str(request.form.get("admin_password") or "")
-        primary_admin = bool(
-            configured_phone
-            and configured_password
-            and submitted_phone == configured_phone
-            and hmac.compare_digest(submitted_password, configured_password)
-        )
+        submitted_password = str(request.form.get("staff_password") or "")
         staff = query_db(
             "SELECT id, fullname, phone, password_hash, role FROM staff_accounts "
             "WHERE phone = %s AND active = %s",
@@ -1180,13 +1172,13 @@ def login():
             and staff["role"] in ROLE_PERMISSIONS
             and check_password_hash(staff["password_hash"], submitted_password)
         )
-        if primary_admin or staff_valid:
+        if staff_valid:
             query_db("DELETE FROM auth_attempts WHERE request_ip = %s", (request_ip,))
             session.clear()
             session["is_admin"] = True
-            session["staff_role"] = "owner" if primary_admin else staff["role"]
+            session["staff_role"] = staff["role"]
             session["staff_phone"] = submitted_phone
-            session["staff_name"] = "Vior Administrator" if primary_admin else staff["fullname"]
+            session["staff_name"] = staff["fullname"]
             return redirect(url_for("admin_dashboard"))
         query_db(
             "INSERT INTO auth_attempts (request_ip, attempted_at) VALUES (%s, %s)",

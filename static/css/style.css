@@ -1570,6 +1570,58 @@ lottie-player {
     background: #fbf8f4;
 }
 
+.receipt-page {
+    min-height: 100vh;
+    padding: 3rem 0;
+    background: #f7f3ee;
+}
+
+.receipt-card {
+    max-width: 850px;
+    padding: clamp(1.25rem, 4vw, 3rem);
+    border-radius: 20px;
+    background: #fff;
+    box-shadow: 0 18px 50px rgba(30, 25, 20, 0.1);
+}
+
+.receipt-card h1 {
+    font-family: 'Playfair Display', Georgia, serif;
+}
+
+.receipt-meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 0.8rem;
+    margin: 1.5rem 0;
+}
+
+.receipt-meta div {
+    padding: 0.8rem;
+    border-radius: 10px;
+    background: #faf8f4;
+}
+
+.receipt-meta dt {
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+
+.receipt-meta dd {
+    margin: 0.2rem 0 0;
+    overflow-wrap: anywhere;
+    font-weight: 600;
+}
+
+.receipt-items {
+    min-width: 500px;
+}
+
+.receipt-thanks {
+    margin: 1.5rem 0;
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 1.15rem;
+}
+
 .stories-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
@@ -1613,6 +1665,70 @@ lottie-player {
     height: 180px;
     object-fit: cover;
     background: #151515;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.menu-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.8rem 1rem;
+    max-width: 720px;
+    margin: 0 auto 2rem;
+}
+
+.menu-tools > input[type="search"] {
+    flex: 1 1 260px;
+}
+
+.favorite-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-weight: 600;
+}
+
+.menu-tools p {
+    flex-basis: 100%;
+    min-height: 1em;
+    color: var(--muted);
+}
+
+.language-switch {
+    width: auto;
+    min-width: 4.5rem;
+    padding: 0.45rem;
+}
+
+.favorite-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.4rem;
+    height: 2.4rem;
+    margin: 0.6rem 0.65rem 0 0;
+    border: 1px solid rgba(10,10,10,0.12);
+    border-radius: 50%;
+    background: #fff;
+    color: #777;
+    cursor: pointer;
+    font-size: 1.2rem;
+}
+
+.favorite-toggle[aria-pressed="true"] {
+    color: #b20d24;
+    border-color: #b20d24;
 }
 
 .table-wrap {
@@ -1670,6 +1786,22 @@ lottie-player {
 @media (max-width: 760px) {
     .admin-form-grid {
         grid-template-columns: 1fr;
+    }
+
+    @media print {
+        .receipt-page {
+            padding: 0;
+            background: #fff;
+        }
+
+        .receipt-card {
+            max-width: none;
+            box-shadow: none;
+        }
+
+        .receipt-card > .btn {
+            display: none;
+        }
     }
 
     .admin-form-wide {

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="{{ profile.preferred_language or 'en' }}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#b20d24">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+    <title>Your account - Vior Hotel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="page-shell">
+    <header class="site-header">
+        <div class="container nav-shell">
+            <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark">V</span><span>Vior Hotel</span></a>
+            <nav class="main-nav" aria-label="Account navigation">
+                <a href="{{ url_for('index') }}">Menu</a>
+                <a href="{{ url_for('cart') }}">Cart</a>
+                <a href="{{ url_for('logout') }}">Sign out</a>
+            </nav>
+        </div>
+    </header>
+    <main class="container account-layout">
+        <section class="admin-panel">
+            <p class="eyebrow eyebrow-red">Your Vior account</p>
+            <h1>Welcome, {{ profile.fullname }}</h1>
+            <p>{{ profile.phone }}</p>
+            <h2>Profile &amp; preferences</h2>
+            <form action="{{ url_for('update_customer_profile') }}" method="POST" class="content-editor-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="admin-form-grid">
+                    <div class="form-group">
+                        <label for="accountEmail">Email</label>
+                        <input id="accountEmail" type="email" name="email" value="{{ profile.email or '' }}" autocomplete="email">
+                    </div>
+                    <div class="form-group">
+                        <label for="accountLanguage">Preferred language</label>
+                        <select id="accountLanguage" name="preferred_language">
+                            <option value="en" {{ 'selected' if profile.preferred_language == 'en' else '' }}>English</option>
+                            <option value="sw" {{ 'selected' if profile.preferred_language == 'sw' else '' }}>Kiswahili</option>
+                        </select>
+                    </div>
+                </div>
+                <label class="admin-check"><input type="checkbox" name="whatsapp_opt_in" {{ 'checked' if profile.whatsapp_opt_in else '' }}> I agree to receive Vior Hotel service updates and receipts on WhatsApp.</label>
+                <button class="btn btn-primary" type="submit">Save profile</button>
+            </form>
+
+            <h2>Saved delivery addresses</h2>
+            <form action="{{ url_for('save_customer_address') }}" method="POST" class="content-editor-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="admin-form-grid">
+                    <div class="form-group"><label for="addressLabel">Address label</label><input id="addressLabel" name="label" maxlength="40" placeholder="Home" required></div>
+                    <div class="form-group"><label for="addressStreet">Street address</label><input id="addressStreet" name="address" maxlength="250" required></div>
+                    <div class="form-group"><label for="addressLocality">Town / city</label><input id="addressLocality" name="locality" maxlength="100" required></div>
+                    <div class="form-group"><label for="addressRegion">County / region</label><input id="addressRegion" name="region" maxlength="100"></div>
+                    <div class="form-group"><label for="addressPostal">Postal code</label><input id="addressPostal" name="postal_code" maxlength="20" required></div>
+                    <div class="form-group"><label for="addressCountry">Country</label><input id="addressCountry" name="country" value="Kenya" maxlength="80" required></div>
+                </div>
+                <label class="admin-check"><input type="checkbox" name="is_default"> Set as default address</label>
+                <button class="btn btn-secondary" type="submit">Save address</button>
+            </form>
+            {% for address in addresses %}
+            <article class="managed-content-row">
+                <div><strong>{{ address.label }}{% if address.is_default %} · Default{% endif %}</strong><p>{{ address.address }}, {{ address.locality }} {{ address.postal_code }}, {{ address.country }}</p></div>
+            </article>
+            {% else %}
+            <p>No saved addresses yet.</p>
+            {% endfor %}
+
+            <h2>Loyalty</h2>
+            <p>Points balance: <strong>{{ loyalty.points_balance if loyalty else 0 }}</strong></p>
+            <p>Earn one point per KES 100 in verified payments. Rewards redemption still needs to be configured before points can be spent.</p>
+
+            <h2>Order history</h2>
+            <div class="table-wrap">
+                <table class="orders-table">
+                    <thead><tr><th>Order</th><th>Items</th><th>Type</th><th>Total</th><th>Status</th><th>Receipt</th></tr></thead>
+                    <tbody>
+                    {% for order in orders %}
+                        <tr>
+                            <td>{{ order.order_number }}</td>
+                            <td>{{ order.items }}</td>
+                            <td>{{ order.order_type }}</td>
+                            <td>KES {{ '%.2f'|format(order.amount) }}</td>
+                            <td>{{ order.status }}</td>
+                            <td>{% if order.receipt_url %}<a href="{{ order.receipt_url }}">View receipt</a>{% else %}Not paid / pending{% endif %}</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="6">No orders yet.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+</body>
+</html>

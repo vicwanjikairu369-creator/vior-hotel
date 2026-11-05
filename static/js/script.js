@@ -1,4 +1,103 @@
 // Shared cart, order tracking, reviews, and invoice helpers.
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js').catch(error => {
+            console.error('Vior Hotel offline support could not start:', error);
+        });
+    });
+}
+
+const SWAHILI_TEXT = {
+    'Home': 'Mwanzo',
+    'Menu': 'Menyu',
+    'Experience': 'Huduma',
+    'Reviews': 'Maoni',
+    'Contact': 'Wasiliana',
+    'Cart': 'Kikapu',
+    'Sign in': 'Ingia',
+    'Register': 'Jisajili',
+    'My account': 'Akaunti yangu',
+    'Back to menu': 'Rudi kwenye menyu',
+    'Checkout': 'Lipa',
+    'Time for Food · Kenyan fine dining, crafted daily': 'Wakati wa Chakula · Vyakula vya Kenya, vilivyoandaliwa kila siku',
+    'Bold Kenyan comfort food, thoughtfully prepared and served in a refined, welcoming space.': 'Vyakula vitamu vya Kenya, vilivyoandaliwa kwa umakini na kutolewa kwa ukarimu.',
+    'View Menu': 'Tazama Menyu',
+    'Order Now': 'Agiza Sasa',
+    "Chef's collection": 'Chaguo la Mpishi',
+    'Comfort food, elevated.': 'Vyakula vitamu vya kipekee.',
+    'Breakfast': 'Kiamsha kinywa',
+    'Lunch & dinner': 'Chakula cha mchana na jioni',
+    'Snacks & sweets': 'Vitafunwa na peremende',
+    'New at Vior': 'Vipya Vior',
+    'Add to Cart': 'Ongeza Kikapuni',
+    'Search meals...': 'Tafuta chakula...',
+    'Show saved meals': 'Onyesha vyakula vilivyohifadhiwa',
+    'Your order': 'Agizo lako',
+    'Order summary': 'Muhtasari wa agizo',
+    'Checkout details': 'Maelezo ya malipo',
+    'Delivery Method': 'Njia ya kupokea',
+    'Pickup at Hotel': 'Chukua Hoteli',
+    'Online Delivery': 'Uwasilishaji',
+    'Special instructions': 'Maelekezo maalum',
+    'Continue to secure payment': 'Endelea kulipa kwa usalama',
+    'Track Order': 'Fuatilia agizo',
+    'Track current order': 'Fuatilia agizo la sasa',
+    'People keep coming back.': 'Wateja hurudi tena na tena.',
+    'Stories, specials & offers.': 'Habari, vyakula maalum na ofa.',
+    'From Vior Hotel': 'Kutoka Vior Hotel',
+};
+const originalTextNodes = new Map();
+const visibleTextWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+        return node.parentElement?.closest('script,style,textarea') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+    },
+});
+while (visibleTextWalker.nextNode()) {
+    originalTextNodes.set(visibleTextWalker.currentNode, visibleTextWalker.currentNode.nodeValue);
+}
+
+function applyLanguage(language) {
+    const swahili = language === 'sw';
+    document.documentElement.lang = swahili ? 'sw' : 'en';
+    for (const [node, original] of originalTextNodes) {
+        const content = original.trim();
+        const translated = swahili ? SWAHILI_TEXT[content] : null;
+        if (translated) {
+            const start = original.indexOf(content);
+            node.nodeValue = `${original.slice(0, start)}${translated}${original.slice(start + content.length)}`;
+        } else {
+            node.nodeValue = original;
+        }
+    }
+    document.querySelectorAll('[placeholder]').forEach(element => {
+        if (!element.dataset.englishPlaceholder) {
+            element.dataset.englishPlaceholder = element.placeholder;
+        }
+        element.placeholder = swahili
+            ? SWAHILI_TEXT[element.dataset.englishPlaceholder] || element.dataset.englishPlaceholder
+            : element.dataset.englishPlaceholder;
+    });
+    document.querySelectorAll('#siteLanguage').forEach(select => { select.value = swahili ? 'sw' : 'en'; });
+}
+
+let initialLanguage = document.documentElement.lang;
+try {
+    initialLanguage = localStorage.getItem('viorLang') || initialLanguage;
+} catch (error) {
+    console.warn('Language preference could not be loaded:', error);
+}
+applyLanguage(initialLanguage);
+document.querySelectorAll('#siteLanguage').forEach(select => {
+    select.addEventListener('change', () => {
+        try {
+            localStorage.setItem('viorLang', select.value);
+        } catch (error) {
+            console.warn('Language preference could not be saved:', error);
+        }
+        applyLanguage(select.value);
+    });
+});
+
 const CART_STORAGE_KEY = `viorCart:${document.body.dataset.cartKey || 'guest'}`;
 let cart = [];
 try {
@@ -17,6 +116,76 @@ let driverMarker = null;
 let deliveryLine = null;
 let trackingPoller = null;
 let trackedOrderNumber = null;
+
+function setupMenuSearchAndFavorites() {
+    const search = document.getElementById('menuSearch');
+    const favoritesOnly = document.getElementById('favoritesOnly');
+    if (!search || !favoritesOnly) return;
+    const status = document.getElementById('menuSearchStatus');
+    const cards = [...document.querySelectorAll('.menu-card')];
+    let favorites = [];
+    try {
+        const saved = JSON.parse(localStorage.getItem('viorFavorites') || '[]');
+        favorites = Array.isArray(saved) ? saved.filter(name => typeof name === 'string') : [];
+    } catch (error) {
+        console.error('Saved meals could not be loaded:', error);
+    }
+    const saveFavorites = () => {
+        try {
+            localStorage.setItem('viorFavorites', JSON.stringify(favorites));
+        } catch (error) {
+            console.error('Saved meals could not be stored:', error);
+            status.textContent = 'Your browser could not save favorite meals.';
+        }
+    };
+    cards.forEach(card => {
+        const name = card.querySelector('.menu-copy h4')?.textContent?.trim();
+        if (!name) return;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'favorite-toggle';
+        button.setAttribute('aria-label', `Save ${name} to favorites`);
+        button.setAttribute('aria-pressed', String(favorites.includes(name)));
+        button.textContent = favorites.includes(name) ? '♥' : '♡';
+        button.addEventListener('click', () => {
+            favorites = favorites.includes(name)
+                ? favorites.filter(item => item !== name)
+                : [...favorites, name];
+            button.setAttribute('aria-pressed', String(favorites.includes(name)));
+            button.setAttribute(
+                'aria-label',
+                `${favorites.includes(name) ? 'Remove' : 'Save'} ${name} ${favorites.includes(name) ? 'from' : 'to'} favorites`,
+            );
+            button.textContent = favorites.includes(name) ? '♥' : '♡';
+            saveFavorites();
+            filterCards();
+        });
+        card.querySelector('.menu-copy')?.prepend(button);
+    });
+
+    function filterCards() {
+        const term = search.value.trim().toLocaleLowerCase();
+        let visible = 0;
+        cards.forEach(card => {
+            const name = card.querySelector('.menu-copy h4')?.textContent || '';
+            const description = card.querySelector('.menu-copy p')?.textContent || '';
+            const matches = `${name} ${description}`.toLocaleLowerCase().includes(term);
+            const favorite = favorites.includes(name.trim());
+            const show = matches && (!favoritesOnly.checked || favorite);
+            card.hidden = !show;
+            if (show) visible += 1;
+        });
+        document.querySelectorAll('.menu-category').forEach(category => {
+            category.hidden = !category.querySelector('.menu-card:not([hidden])');
+        });
+        status.textContent = `${visible} meal${visible === 1 ? '' : 's'} shown`;
+    }
+    search.addEventListener('input', filterCards);
+    favoritesOnly.addEventListener('change', filterCards);
+    filterCards();
+}
+
+setupMenuSearchAndFavorites();
 
 function addToCart(itemName, itemPrice) {
     let catalog = [];

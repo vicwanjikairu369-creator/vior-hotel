@@ -17,15 +17,19 @@
                 <span>Vior Hotel</span>
             </a>
             <nav class="main-nav" aria-label="Admin navigation">
-                <span class="nav-welcome">Admin Dashboard</span>
-                <a href="#story-management">Stories</a>
-                <a href="#menu-management">Menu</a>
+                <span class="nav-welcome">{{ staff_name }} · {{ staff_role|title }}</span>
+                {% if can_manage_content %}<a href="#story-management">Stories</a><a href="#menu-management">Menu</a>{% endif %}
+                {% if can_manage_inventory %}<a href="#inventory-management">Inventory</a>{% endif %}
+                {% if can_view_finance %}<a href="#finance-management">Finance</a>{% endif %}
+                {% if can_manage_customers %}<a href="#customer-management">Customers</a>{% endif %}
+                {% if can_manage_staff %}<a href="#staff-management">Staff</a>{% endif %}
                 <a href="{{ url_for('logout') }}">Logout</a>
             </nav>
         </div>
     </header>
 
     <main class="container admin-shell">
+        {% if can_manage_orders %}
         <section class="admin-panel">
             <div class="section-heading left">
                 <p class="eyebrow eyebrow-red">Operations</p>
@@ -97,6 +101,12 @@
                                     Notify customer on WhatsApp
                                 </a>
                                 {% endif %}
+                                <form action="{{ url_for('assign_delivery', order_number=order.order_number) }}" method="POST" class="status-update-form">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                    <input name="driver_name" aria-label="Driver name" placeholder="Driver name" required>
+                                    <input name="driver_phone" type="tel" aria-label="Driver phone" placeholder="Driver phone" required>
+                                    <button type="submit" class="btn btn-secondary admin-action">Assign driver</button>
+                                </form>
                                 {% elif order.status == 'Delivered' %}
                                 <span class="status-pill status-pill-delivered">Delivered</span>
                                 {% else %}
@@ -110,8 +120,15 @@
                     </tbody>
                 </table>
             </div>
+            <h3>Recipe deductions</h3>
+            <div class="table-wrap"><table class="orders-table">
+                <thead><tr><th>Dish</th><th>Ingredient ID</th><th>Quantity per serving</th></tr></thead>
+                <tbody>{% for recipe in recipes %}<tr><td>{{ recipe.menu_item_name }}</td><td>{{ recipe.inventory_item_id }}</td><td>{{ recipe.quantity_per_serving }}</td></tr>{% else %}<tr><td colspan="3">No recipe deductions configured.</td></tr>{% endfor %}</tbody>
+            </table></div>
         </section>
+        {% endif %}
 
+        {% if can_manage_content %}
         <section class="admin-panel content-management-panel" id="story-management">
             <div class="section-heading left">
                 <p class="eyebrow eyebrow-red">Marketing</p>
@@ -246,6 +263,163 @@
                 {% endfor %}
             </div>
         </section>
+        {% endif %}
+
+        {% if can_manage_inventory %}
+        <section class="admin-panel content-management-panel" id="inventory-management">
+            <div class="section-heading left">
+                <p class="eyebrow eyebrow-red">Operations</p>
+                <h2>Inventory &amp; suppliers</h2>
+                <p>Stock is deducted when a paid order starts preparation if a recipe has been recorded for that dish. Low-stock items appear first below.</p>
+            </div>
+            {% if low_stock_items %}
+            <p class="payment-notice" role="status">Low stock: {% for item in low_stock_items %}{{ item.name }} ({{ item.quantity }} {{ item.unit }}){% if not loop.last %}, {% endif %}{% endfor %}</p>
+            {% endif %}
+
+            {% if can_view_finance %}
+            <section class="admin-panel content-management-panel" id="finance-management">
+                <div class="section-heading left">
+                    <p class="eyebrow eyebrow-red">Accounting</p>
+                    <h2>Recorded finances</h2>
+                    <p>Revenue includes verified payments only. Expenses include records entered here and supplier purchases; profit is revenue less recorded expenses, not a forecast.</p>
+                </div>
+                <div class="admin-form-grid">
+                    <article class="admin-stat"><span>Verified revenue</span><strong>KES {{ '%.2f'|format(finance_totals.revenue) }}</strong></article>
+                    <article class="admin-stat"><span>Recorded expenses</span><strong>KES {{ '%.2f'|format(finance_totals.expenses) }}</strong></article>
+                    <article class="admin-stat"><span>Recorded refunds</span><strong>KES {{ '%.2f'|format(finance_totals.refunds) }}</strong></article>
+                    <article class="admin-stat"><span>Recorded net</span><strong>KES {{ '%.2f'|format(finance_totals.revenue - finance_totals.expenses - finance_totals.refunds) }}</strong></article>
+                </div>
+                <form action="{{ url_for('record_expense') }}" method="POST" class="content-editor-form">
+                    <h3>Record expense / refund</h3>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="reference" value="{{ expense_idempotency_key }}">
+                    <div class="admin-form-grid">
+                        <div class="form-group"><label for="expenseCategory">Category</label><input id="expenseCategory" name="category" maxlength="80" placeholder="Utilities, wages, refund..." required></div>
+                        <div class="form-group"><label for="expenseAmount">Amount (KES)</label><input id="expenseAmount" type="number" step="0.01" min="0.01" name="amount" required></div>
+                        <div class="form-group admin-form-wide"><label for="expenseNotes">Description / reference</label><input id="expenseNotes" name="notes" maxlength="500"></div>
+                    </div>
+                    <button class="btn btn-primary" type="submit">Record outgoing amount</button>
+                </form>
+                <form action="{{ url_for('record_refund') }}" method="POST" class="content-editor-form">
+                    <h3>Record a provider-confirmed refund</h3>
+                    <p>First complete the refund with the payment provider. This form records the verified refund for reporting; it does not transfer money.</p>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <div class="admin-form-grid">
+                        <div class="form-group"><label for="refundOrder">Order number</label><input id="refundOrder" name="order_number" required></div>
+                        <div class="form-group"><label for="refundAmount">Refund amount (KES)</label><input id="refundAmount" type="number" step="0.01" min="0.01" name="amount" required></div>
+                        <div class="form-group"><label for="refundReference">Provider refund reference</label><input id="refundReference" name="reference" minlength="8" maxlength="100" required></div>
+                    </div>
+                    <button class="btn btn-secondary" type="submit">Record confirmed refund</button>
+                </form>
+                <p><a class="btn btn-secondary" href="{{ url_for('export_financial_records') }}">Export financial CSV</a></p>
+                <div class="table-wrap">
+                    <table class="orders-table">
+                        <thead><tr><th>Date</th><th>Type</th><th>Category</th><th>Amount</th><th>Reference</th><th>Notes</th></tr></thead>
+                        <tbody>{% for tx in financial_transactions %}<tr><td>{{ tx.created_at }}</td><td>{{ tx.transaction_type }}</td><td>{{ tx.category }}</td><td>KES {{ '%.2f'|format(tx.amount) }}</td><td>{{ tx.reference or '—' }}</td><td>{{ tx.notes or '—' }}</td></tr>{% else %}<tr><td colspan="6">No financial transactions recorded.</td></tr>{% endfor %}</tbody>
+                    </table>
+                </div>
+            </section>
+            {% endif %}
+
+            {% if can_manage_customers %}
+            <section class="admin-panel content-management-panel" id="customer-management">
+                <div class="section-heading left"><p class="eyebrow eyebrow-red">Customers</p><h2>Customer accounts</h2></div>
+                <div class="table-wrap"><table class="orders-table">
+                    <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Language</th><th>Loyalty</th><th>Orders</th></tr></thead>
+                    <tbody>{% for customer in customers %}<tr><td>{{ customer.fullname }}</td><td>{{ customer.phone }}</td><td>{{ customer.email or '—' }}</td><td>{{ customer.preferred_language }}</td><td>{{ customer.points_balance or 0 }}</td><td>{{ customer.order_count or 0 }}</td></tr>{% else %}<tr><td colspan="6">No customers yet.</td></tr>{% endfor %}</tbody>
+                </table></div>
+            </section>
+            {% endif %}
+
+            {% if can_manage_staff %}
+            <section class="admin-panel content-management-panel" id="staff-management">
+                <div class="section-heading left"><p class="eyebrow eyebrow-red">Access control</p><h2>Staff accounts &amp; roles</h2></div>
+                <form action="{{ url_for('create_staff_account') }}" method="POST" class="content-editor-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <div class="admin-form-grid">
+                        <div class="form-group"><label for="staffFullname">Full name</label><input id="staffFullname" name="fullname" maxlength="80" required></div>
+                        <div class="form-group"><label for="staffPhone">Phone</label><input id="staffPhone" name="phone" type="tel" required></div>
+                        <div class="form-group"><label for="staffPassword">Temporary password (min 12 chars)</label><input id="staffPassword" name="password" type="password" minlength="12" autocomplete="new-password" required></div>
+                        <div class="form-group"><label for="staffRole">Role</label><select id="staffRole" name="role"><option value="manager">Manager</option><option value="accountant">Accountant</option><option value="kitchen">Kitchen</option><option value="delivery">Delivery</option></select></div>
+                    </div>
+                    <button class="btn btn-primary" type="submit">Create staff account</button>
+                </form>
+                <div class="table-wrap"><table class="orders-table">
+                    <thead><tr><th>Name</th><th>Phone</th><th>Role</th><th>Access</th><th>Action</th></tr></thead>
+                    <tbody>{% for staff in staff_accounts %}<tr><td>{{ staff.fullname }}</td><td>{{ staff.phone }}</td><td>{{ staff.role|title }}</td><td>{{ 'Active' if staff.active else 'Disabled' }}</td><td><form action="{{ url_for('toggle_staff_account', staff_id=staff.id) }}" method="POST"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="active" value="{{ 'false' if staff.active else 'true' }}"><button class="btn btn-secondary" type="submit">{{ 'Disable' if staff.active else 'Enable' }}</button></form></td></tr>{% else %}<tr><td colspan="5">No additional staff accounts.</td></tr>{% endfor %}</tbody>
+                </table></div>
+            </section>
+            {% endif %}
+
+            {% if staff_role in ['owner', 'manager'] %}
+            <section class="admin-panel content-management-panel">
+                <div class="section-heading left"><p class="eyebrow eyebrow-red">Notifications</p><h2>WhatsApp delivery queue</h2><p>Failed sends and retry states are recorded here. Pending retries are processed by the protected cron endpoint.</p></div>
+                <div class="table-wrap"><table class="orders-table">
+                    <thead><tr><th>Created</th><th>Recipient</th><th>Template</th><th>Status</th><th>Attempts</th><th>Last error</th></tr></thead>
+                    <tbody>{% for entry in notification_entries %}<tr><td>{{ entry.created_at }}</td><td>{{ entry.recipient }}</td><td>{{ entry.template_name }}</td><td>{{ entry.status }}</td><td>{{ entry.attempts }}</td><td>{{ entry.last_error or '—' }}</td></tr>{% else %}<tr><td colspan="6">No WhatsApp notifications queued.</td></tr>{% endfor %}</tbody>
+                </table></div>
+            </section>
+            {% endif %}
+            <div class="admin-form-grid">
+                <form action="{{ url_for('save_inventory_item') }}" method="POST" class="content-editor-form">
+                    <h3>Add stock item</h3>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <div class="form-group"><label for="stockName">Ingredient</label><input id="stockName" name="name" maxlength="120" required></div>
+                    <div class="form-group"><label for="stockUnit">Unit (kg, L, pcs)</label><input id="stockUnit" name="unit" maxlength="30" required></div>
+                    <div class="form-group"><label for="stockQuantity">Opening quantity</label><input id="stockQuantity" type="number" step="0.001" min="0" name="quantity" required></div>
+                    <div class="form-group"><label for="stockReorder">Low-stock alert at</label><input id="stockReorder" type="number" step="0.001" min="0" name="reorder_level" required></div>
+                    <div class="form-group"><label for="stockCost">Unit cost (KES)</label><input id="stockCost" type="number" step="0.01" min="0" name="unit_cost" required></div>
+                    <button class="btn btn-primary" type="submit">Save inventory item</button>
+                </form>
+                <form action="{{ url_for('save_supplier') }}" method="POST" class="content-editor-form">
+                    <h3>Add supplier</h3>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <div class="form-group"><label for="supplierName">Supplier name</label><input id="supplierName" name="name" maxlength="120" required></div>
+                    <div class="form-group"><label for="supplierPhone">Phone</label><input id="supplierPhone" name="phone" maxlength="40"></div>
+                    <div class="form-group"><label for="supplierEmail">Email</label><input id="supplierEmail" type="email" name="email" maxlength="254"></div>
+                    <div class="form-group"><label for="supplierNotes">Notes</label><textarea id="supplierNotes" name="notes" maxlength="500"></textarea></div>
+                    <button class="btn btn-primary" type="submit">Save supplier</button>
+                </form>
+            </div>
+            <form action="{{ url_for('record_inventory_purchase') }}" method="POST" class="content-editor-form">
+                <h3>Record supplier purchase</h3>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="admin-form-grid">
+                    <div class="form-group"><label for="purchaseItem">Ingredient</label><select id="purchaseItem" name="item_id" required>{% for item in inventory_items %}<option value="{{ item.id }}">{{ item.name }} ({{ item.unit }})</option>{% endfor %}</select></div>
+                    <div class="form-group"><label for="purchaseSupplier">Supplier</label><select id="purchaseSupplier" name="supplier_id" required>{% for supplier in suppliers %}<option value="{{ supplier.id }}">{{ supplier.name }}</option>{% endfor %}</select></div>
+                    <div class="form-group"><label for="purchaseQuantity">Quantity received</label><input id="purchaseQuantity" type="number" step="0.001" min="0.001" name="quantity" required></div>
+                    <div class="form-group"><label for="purchaseCost">Unit cost (KES)</label><input id="purchaseCost" type="number" step="0.01" min="0" name="unit_cost" required></div>
+                    <div class="form-group"><label for="purchaseReference">Unique invoice/reference</label><input id="purchaseReference" name="reference" minlength="8" maxlength="100" required></div>
+                </div>
+                <button class="btn btn-primary" type="submit">Record purchase and stock</button>
+            </form>
+            <div class="admin-form-grid">
+                <form action="{{ url_for('record_inventory_movement') }}" method="POST" class="content-editor-form">
+                    <h3>Record wastage / adjustment</h3>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <div class="form-group"><label for="movementItem">Ingredient</label><select id="movementItem" name="item_id" required>{% for item in inventory_items %}<option value="{{ item.id }}">{{ item.name }}</option>{% endfor %}</select></div>
+                    <div class="form-group"><label for="movementType">Movement</label><select id="movementType" name="movement_type"><option value="waste">Wastage</option><option value="adjustment">Stock correction (increase)</option></select></div>
+                    <div class="form-group"><label for="movementQuantity">Quantity</label><input id="movementQuantity" type="number" step="0.001" min="0.001" name="quantity" required></div>
+                    <div class="form-group"><label for="movementNotes">Notes</label><input id="movementNotes" name="notes" maxlength="500"></div>
+                    <button class="btn btn-secondary" type="submit">Record stock movement</button>
+                </form>
+                <form action="{{ url_for('save_inventory_recipe') }}" method="POST" class="content-editor-form">
+                    <h3>Recipe / ingredient usage</h3>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <div class="form-group"><label for="recipeDish">Dish</label><select id="recipeDish" name="menu_item_name">{% for item in recipe_menu_items %}<option value="{{ item.name }}">{{ item.name }}</option>{% endfor %}</select></div>
+                    <div class="form-group"><label for="recipeIngredient">Ingredient</label><select id="recipeIngredient" name="inventory_item_id">{% for item in inventory_items %}<option value="{{ item.id }}">{{ item.name }} ({{ item.unit }})</option>{% endfor %}</select></div>
+                    <div class="form-group"><label for="recipeQuantity">Quantity per serving</label><input id="recipeQuantity" type="number" step="0.001" min="0.001" name="quantity_per_serving" required></div>
+                    <button class="btn btn-secondary" type="submit">Save recipe usage</button>
+                </form>
+            </div>
+            <div class="table-wrap">
+                <table class="orders-table">
+                    <thead><tr><th>Ingredient</th><th>On hand</th><th>Reorder point</th><th>Unit cost</th></tr></thead>
+                    <tbody>{% for item in inventory_items %}<tr><td>{{ item.name }}</td><td>{{ item.quantity }} {{ item.unit }}</td><td>{{ item.reorder_level }}</td><td>KES {{ '%.2f'|format(item.unit_cost) }}</td></tr>{% else %}<tr><td colspan="4">No inventory items yet.</td></tr>{% endfor %}</tbody>
+                </table>
+            </div>
+        </section>
+        {% endif %}
     </main>
 
     <a href="https://wa.me/254703360356?text=Hello%20Vior%20Hotel%2C%20I%20would%20like%20to%20make%20an%20inquiry." class="whatsapp-float" target="_blank" rel="noopener noreferrer" aria-label="Chat on WhatsApp">

@@ -18,6 +18,9 @@ _SQLITE_SCHEMA = (
         fullname TEXT NOT NULL,
         phone TEXT NOT NULL UNIQUE,
         phone_verified_at TEXT,
+        email TEXT,
+        preferred_language TEXT NOT NULL DEFAULT 'en',
+        whatsapp_opt_in INTEGER NOT NULL DEFAULT 0,
         dob TEXT,
         gender TEXT,
         customer_type TEXT
@@ -45,7 +48,12 @@ _SQLITE_SCHEMA = (
         driver_latitude REAL,
         driver_longitude REAL,
         driver_accuracy REAL,
-        driver_updated_at TEXT
+        driver_updated_at TEXT,
+        customer_id INTEGER,
+        special_instructions TEXT,
+        scheduled_at TEXT,
+        whatsapp_opt_in INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT
     )
     """,
     """
@@ -114,9 +122,158 @@ _SQLITE_SCHEMA = (
         created_at TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS customer_addresses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL,
+        label TEXT NOT NULL,
+        address TEXT NOT NULL,
+        locality TEXT NOT NULL,
+        region TEXT,
+        postal_code TEXT NOT NULL,
+        country TEXT NOT NULL,
+        is_default INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS staff_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fullname TEXT NOT NULL,
+        phone TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        actor TEXT NOT NULL,
+        action TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        details TEXT,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS loyalty_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL UNIQUE,
+        points_balance INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS loyalty_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL,
+        order_number TEXT,
+        points INTEGER NOT NULL,
+        transaction_type TEXT NOT NULL,
+        reference TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS inventory_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        unit TEXT NOT NULL,
+        quantity REAL NOT NULL DEFAULT 0,
+        reorder_level REAL NOT NULL DEFAULT 0,
+        unit_cost REAL NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS suppliers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        phone TEXT,
+        email TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS inventory_movements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id INTEGER NOT NULL,
+        supplier_id INTEGER,
+        quantity REAL NOT NULL,
+        unit_cost REAL NOT NULL DEFAULT 0,
+        movement_type TEXT NOT NULL,
+        reference TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS inventory_recipes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        menu_item_name TEXT NOT NULL,
+        inventory_item_id INTEGER NOT NULL,
+        quantity_per_serving REAL NOT NULL,
+        UNIQUE (menu_item_name, inventory_item_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS financial_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        transaction_type TEXT NOT NULL,
+        category TEXT NOT NULL,
+        amount REAL NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'KES',
+        reference TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS delivery_assignments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_number TEXT NOT NULL UNIQUE,
+        driver_name TEXT NOT NULL,
+        driver_phone TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'Assigned',
+        assigned_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS notification_outbox (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        channel TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        template_name TEXT NOT NULL,
+        language_code TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'Pending',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at TEXT NOT NULL,
+        last_error TEXT,
+        provider_message_id TEXT,
+        created_at TEXT NOT NULL,
+        sent_at TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS auth_attempts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        request_ip TEXT NOT NULL,
+        attempted_at TEXT NOT NULL
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_otp_phone_created_at ON otp_challenges (phone, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_otp_ip_created_at ON otp_challenges (request_ip, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_payments_order_number ON payments (order_number)",
+    "CREATE INDEX IF NOT EXISTS idx_auth_attempts_ip_time ON auth_attempts (request_ip, attempted_at)",
 )
 
 _POSTGRES_SCHEMA = (
@@ -126,6 +283,9 @@ _POSTGRES_SCHEMA = (
         fullname TEXT NOT NULL,
         phone TEXT NOT NULL UNIQUE,
         phone_verified_at TEXT,
+        email TEXT,
+        preferred_language TEXT NOT NULL DEFAULT 'en',
+        whatsapp_opt_in BOOLEAN NOT NULL DEFAULT FALSE,
         dob TEXT,
         gender TEXT,
         customer_type TEXT
@@ -153,7 +313,12 @@ _POSTGRES_SCHEMA = (
         driver_latitude DOUBLE PRECISION,
         driver_longitude DOUBLE PRECISION,
         driver_accuracy DOUBLE PRECISION,
-        driver_updated_at TEXT
+        driver_updated_at TEXT,
+        customer_id INTEGER,
+        special_instructions TEXT,
+        scheduled_at TEXT,
+        whatsapp_opt_in BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TEXT
     )
     """,
     """
@@ -222,9 +387,158 @@ _POSTGRES_SCHEMA = (
         created_at TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS customer_addresses (
+        id SERIAL PRIMARY KEY,
+        customer_id INTEGER NOT NULL,
+        label TEXT NOT NULL,
+        address TEXT NOT NULL,
+        locality TEXT NOT NULL,
+        region TEXT,
+        postal_code TEXT NOT NULL,
+        country TEXT NOT NULL,
+        is_default BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS staff_accounts (
+        id SERIAL PRIMARY KEY,
+        fullname TEXT NOT NULL,
+        phone TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL,
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS audit_logs (
+        id SERIAL PRIMARY KEY,
+        actor TEXT NOT NULL,
+        action TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        details TEXT,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS loyalty_accounts (
+        id SERIAL PRIMARY KEY,
+        customer_id INTEGER NOT NULL UNIQUE,
+        points_balance INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS loyalty_transactions (
+        id SERIAL PRIMARY KEY,
+        customer_id INTEGER NOT NULL,
+        order_number TEXT,
+        points INTEGER NOT NULL,
+        transaction_type TEXT NOT NULL,
+        reference TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS inventory_items (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        unit TEXT NOT NULL,
+        quantity DOUBLE PRECISION NOT NULL DEFAULT 0,
+        reorder_level DOUBLE PRECISION NOT NULL DEFAULT 0,
+        unit_cost DOUBLE PRECISION NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS suppliers (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        phone TEXT,
+        email TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS inventory_movements (
+        id SERIAL PRIMARY KEY,
+        item_id INTEGER NOT NULL,
+        supplier_id INTEGER,
+        quantity DOUBLE PRECISION NOT NULL,
+        unit_cost DOUBLE PRECISION NOT NULL DEFAULT 0,
+        movement_type TEXT NOT NULL,
+        reference TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS inventory_recipes (
+        id SERIAL PRIMARY KEY,
+        menu_item_name TEXT NOT NULL,
+        inventory_item_id INTEGER NOT NULL,
+        quantity_per_serving DOUBLE PRECISION NOT NULL,
+        UNIQUE (menu_item_name, inventory_item_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS financial_transactions (
+        id SERIAL PRIMARY KEY,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        transaction_type TEXT NOT NULL,
+        category TEXT NOT NULL,
+        amount DOUBLE PRECISION NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'KES',
+        reference TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS delivery_assignments (
+        id SERIAL PRIMARY KEY,
+        order_number TEXT NOT NULL UNIQUE,
+        driver_name TEXT NOT NULL,
+        driver_phone TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'Assigned',
+        assigned_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS notification_outbox (
+        id SERIAL PRIMARY KEY,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        channel TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        template_name TEXT NOT NULL,
+        language_code TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'Pending',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at TEXT NOT NULL,
+        last_error TEXT,
+        provider_message_id TEXT,
+        created_at TEXT NOT NULL,
+        sent_at TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS auth_attempts (
+        id SERIAL PRIMARY KEY,
+        request_ip TEXT NOT NULL,
+        attempted_at TEXT NOT NULL
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_otp_phone_created_at ON otp_challenges (phone, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_otp_ip_created_at ON otp_challenges (request_ip, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_payments_order_number ON payments (order_number)",
+    "CREATE INDEX IF NOT EXISTS idx_auth_attempts_ip_time ON auth_attempts (request_ip, attempted_at)",
 )
 
 _MIGRATIONS = {
@@ -232,6 +546,10 @@ _MIGRATIONS = {
         "fullname": "TEXT",
         "phone": "TEXT",
         "phone_verified_at": "TEXT",
+        "email": "TEXT",
+        "preferred_language": "TEXT NOT NULL DEFAULT 'en'",
+        "whatsapp_opt_in": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "created_at": "TEXT",
         "dob": "TEXT",
         "gender": "TEXT",
         "customer_type": "TEXT",
@@ -257,6 +575,11 @@ _MIGRATIONS = {
         "driver_longitude": "DOUBLE PRECISION",
         "driver_accuracy": "DOUBLE PRECISION",
         "driver_updated_at": "TEXT",
+        "customer_id": "INTEGER",
+        "special_instructions": "TEXT",
+        "scheduled_at": "TEXT",
+        "whatsapp_opt_in": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "created_at": "TEXT",
     },
     "reviews": {
         "name": "TEXT",
@@ -385,6 +708,67 @@ def execute_transaction(statements):
             rowcounts.append(cursor.rowcount)
         connection.commit()
         return rowcounts
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def execute_transaction_checked(statements, checked_indexes):
+    connection = get_db_connection()
+    cursor = connection.cursor()
+    try:
+        rowcounts = []
+        for index, (statement, params) in enumerate(statements):
+            if _connection_is_sqlite(connection):
+                statement = statement.replace("%s", "?")
+            cursor.execute(statement, params)
+            rowcounts.append(cursor.rowcount)
+            if index in checked_indexes and cursor.rowcount != checked_indexes[index]:
+                raise RuntimeError("A required record changed before this operation completed.")
+        connection.commit()
+        return rowcounts
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def add_loyalty_points(customer_id, order_number, points, created_at):
+    connection = get_db_connection()
+    cursor = connection.cursor()
+    try:
+        insert = """
+            INSERT INTO loyalty_transactions
+                (customer_id, order_number, points, transaction_type, reference, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (reference) DO NOTHING
+        """
+        if _connection_is_sqlite(connection):
+            insert = insert.replace("%s", "?")
+        cursor.execute(
+            insert,
+            (customer_id, order_number, points, "earned", f"order:{order_number}", created_at),
+        )
+        if cursor.rowcount != 1:
+            connection.rollback()
+            return False
+        account = """
+            INSERT INTO loyalty_accounts (customer_id, points_balance, updated_at)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (customer_id) DO UPDATE SET
+                points_balance = loyalty_accounts.points_balance + excluded.points_balance,
+                updated_at = excluded.updated_at
+        """
+        if _connection_is_sqlite(connection):
+            account = account.replace("%s", "?")
+        cursor.execute(account, (customer_id, points, created_at))
+        connection.commit()
+        return True
     except Exception:
         connection.rollback()
         raise

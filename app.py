@@ -1,5 +1,6 @@
 import hmac
 import hashlib
+import io
 import json
 import logging
 import os
@@ -11,10 +12,11 @@ from urllib.parse import urlparse
 
 import requests
 from dotenv import load_dotenv
-from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, Response, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from werkzeug.security import check_password_hash, generate_password_hash
 
-from database import execute_transaction, query_db
+from database import add_loyalty_points, execute_transaction, execute_transaction_checked, query_db
 
 load_dotenv()
 
@@ -26,6 +28,11 @@ if os.getenv("VERCEL") == "1" and not os.getenv("DATABASE_URL"):
     raise RuntimeError("Set DATABASE_URL to durable PostgreSQL storage in the deployment environment.")
 app.secret_key = _secret_key or secrets.token_hex(32)
 app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.getenv("VERCEL") == "1",
+)
 
 MENU_ITEMS = [
     {"name": "Tea", "price": 50},
@@ -141,6 +148,20 @@ def _validated_order(data):
         if not phone:
             raise ValueError("Enter a valid Kenyan mobile number.")
         order_type, address, postal_code, verified, latitude, longitude = _delivery_details(data)
+        instructions = str(data.get("special_instructions") or "").strip()
+        if len(instructions) > 500:
+            raise ValueError("Special instructions must be 500 characters or fewer.")
+        scheduled_at = None
+        requested_schedule = str(data.get("scheduled_at") or "").strip()
+        if requested_schedule:
+            scheduled = datetime.fromisoformat(requested_schedule.replace("Z", "+00:00"))
+            if scheduled.tzinfo is None:
+                raise ValueError("Choose a valid order date and time.")
+            scheduled = scheduled.astimezone(timezone.utc)
+            now = datetime.now(timezone.utc)
+            if scheduled < now + timedelta(minutes=30) or scheduled > now + timedelta(days=30):
+                raise ValueError("Schedule orders at least 30 minutes ahead and within the next 30 days.")
+            scheduled_at = scheduled.isoformat()
     except ValueError as error:
         return None, (jsonify({"error": str(error)}), 400)
     return {
@@ -152,6 +173,9 @@ def _validated_order(data):
         "address_verified": verified,
         "latitude": latitude,
         "longitude": longitude,
+        "special_instructions": instructions,
+        "scheduled_at": scheduled_at,
+        "whatsapp_opt_in": data.get("whatsapp_opt_in") is True,
     }, None
 
 
@@ -167,6 +191,9 @@ def _create_order(data, idempotency_key=None):
     verified = validated["address_verified"]
     latitude = validated["latitude"]
     longitude = validated["longitude"]
+    instructions = validated["special_instructions"]
+    scheduled_at = validated["scheduled_at"]
+    whatsapp_opt_in = validated["whatsapp_opt_in"]
 
     amount = sum(item["price"] for item in items)
     if idempotency_key is not None:
@@ -191,6 +218,8 @@ def _create_order(data, idempotency_key=None):
                 and existing["delivery_address"] == address
                 and existing["delivery_postal_code"] == postal_code
                 and existing["amount"] == amount
+                and (existing.get("special_instructions") or "") == instructions
+                and existing.get("scheduled_at") == scheduled_at
             ):
                 return {
                     "order_number": existing["order_number"],
@@ -211,6 +240,7 @@ def _create_order(data, idempotency_key=None):
 
     order_number = _order_number()
     customer_name = session.get("customer_name", "Guest")
+    customer_id = session.get("customer_id")
     status = "Awaiting Till Payment — verify manually"
     query_db(
         """
@@ -218,8 +248,9 @@ def _create_order(data, idempotency_key=None):
             order_number, idempotency_key, customer_name, customer_phone, items, order_type,
             delivery_address, delivery_postal_code, address_verified,
             destination_latitude, destination_longitude, delivery_time, amount,
-            status, status_updated_at
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            status, status_updated_at, customer_id, special_instructions, scheduled_at,
+            whatsapp_opt_in, created_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             order_number,
@@ -237,8 +268,15 @@ def _create_order(data, idempotency_key=None):
             amount,
             status,
             datetime.now(timezone.utc).isoformat(),
+            customer_id,
+            instructions,
+            scheduled_at,
+            whatsapp_opt_in,
+            datetime.now(timezone.utc).isoformat(),
         ),
     )
+    if customer_id and whatsapp_opt_in:
+        query_db("UPDATE users SET whatsapp_opt_in = %s WHERE id = %s", (True, customer_id))
     return {
         "order_number": order_number,
         "phone": phone,
@@ -255,6 +293,21 @@ def _create_order(data, idempotency_key=None):
 
 def _is_admin():
     return session.get("is_admin") is True
+
+
+ROLE_PERMISSIONS = {
+    "owner": {"orders", "content", "inventory", "finance", "customers", "staff"},
+    "manager": {"orders", "content", "inventory", "finance", "customers"},
+    "accountant": {"finance", "customers"},
+    "kitchen": {"orders", "inventory"},
+    "delivery": {"orders", "delivery"},
+}
+
+
+def _has_permission(permission):
+    return _is_admin() and permission in ROLE_PERMISSIONS.get(
+        session.get("staff_role", "owner"), set()
+    )
 
 
 def _valid_csrf_token():
@@ -466,7 +519,11 @@ def _verify_customer_otp(code, purpose):
             "UPDATE users SET phone_verified_at = %s WHERE phone = %s",
             (now.isoformat(), phone),
         )
-    user = query_db("SELECT id, fullname, phone FROM users WHERE phone = %s", (phone,), one=True)
+    user = query_db(
+        "SELECT id, fullname, phone, preferred_language FROM users WHERE phone = %s",
+        (phone,),
+        one=True,
+    )
     if not user:
         return None, ("This customer account is no longer available.", 404)
 
@@ -474,6 +531,7 @@ def _verify_customer_otp(code, purpose):
     session["customer_id"] = user["id"]
     session["customer_name"] = user["fullname"]
     session["customer_phone"] = user["phone"]
+    session["preferred_language"] = user.get("preferred_language") or "en"
     return user, None
 
 
@@ -483,7 +541,261 @@ def _pesapal_base_url():
         return "https://cybqa.pesapal.com/pesapalv3"
     if environment == "live":
         return "https://pay.pesapal.com/v3"
-    return None
+
+
+def _receipt_link(order_number):
+    receipt_token = URLSafeTimedSerializer(app.secret_key, salt="vior-order-receipt").dumps(
+        {"order_number": order_number}
+    )
+    base_url = os.getenv("PUBLIC_BASE_URL", "https://vior-hotel.vercel.app").rstrip("/")
+    return f"{base_url}{url_for('customer_receipt', order_number=order_number, token=receipt_token)}"
+
+
+def _queue_whatsapp_order_event(order_number, event_type, event_value=None):
+    order = query_db(
+        "SELECT * FROM orders WHERE order_number = %s",
+        (order_number,),
+        one=True,
+    )
+    if not order or not order.get("whatsapp_opt_in"):
+        return None
+    payment = query_db(
+        "SELECT receipt FROM payments WHERE order_number = %s AND status = %s "
+        "ORDER BY id DESC",
+        (order_number, "Completed"),
+        one=True,
+    )
+    if not payment:
+        app.logger.warning("WhatsApp %s event was not sent before verified payment for order %s.", event_type, order_number)
+        return None
+    receipt_link = _receipt_link(order_number)
+    if event_type == "receipt":
+        template_name = os.getenv("WHATSAPP_RECEIPT_TEMPLATE", "vior_order_receipt")
+        language_code = os.getenv("WHATSAPP_TEMPLATE_LANGUAGE", "en")
+        item_summary = ", ".join(
+            f"{item.get('quantity', 1)} x {item['name']}"
+            for item in json.loads(order.get("items") or "[]")
+        )
+        body_parameters = [
+            order_number,
+            item_summary[:900],
+            f"KES {order['amount']:.2f}",
+            str((payment or {}).get("receipt") or "Verified"),
+            receipt_link,
+        ]
+    else:
+        template_name = os.getenv("WHATSAPP_STATUS_TEMPLATE", "")
+        if not template_name:
+            app.logger.warning("WhatsApp status template is not configured; skipped %s notification.", event_type)
+            return None
+        language_code = os.getenv("WHATSAPP_TEMPLATE_LANGUAGE", "en")
+        body_parameters = [order_number, str(event_value or ""), receipt_link]
+
+    now = datetime.now(timezone.utc).isoformat()
+    idempotency_key = f"whatsapp:{event_type}:{order_number}:{event_value or ''}"
+    payload = json.dumps({"body_parameters": body_parameters})
+    return query_db(
+        """
+        INSERT INTO notification_outbox (
+            idempotency_key, channel, recipient, template_name, language_code,
+            payload, status, attempts, next_attempt_at, created_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        """,
+        (
+            idempotency_key, "whatsapp", order["customer_phone"], template_name,
+            language_code, payload, "Pending", 0, now, now,
+        ),
+    )
+
+
+def _dispatch_whatsapp_notification(notification_id):
+    now = datetime.now(timezone.utc).isoformat()
+    claimed = query_db(
+        """
+        UPDATE notification_outbox
+        SET status = %s, attempts = attempts + 1, next_attempt_at = %s
+        WHERE id = %s AND status IN (%s, %s) AND next_attempt_at <= %s
+        """,
+        ("Sending", now, notification_id, "Pending", "Retry", now),
+    )
+    if claimed != 1:
+        return False
+    notification = query_db(
+        "SELECT * FROM notification_outbox WHERE id = %s",
+        (notification_id,),
+        one=True,
+    )
+    access_token = os.getenv("WHATSAPP_ACCESS_TOKEN")
+    phone_number_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+    if not access_token or not phone_number_id:
+        error = "WhatsApp Cloud API credentials are not configured."
+        retry_at = (datetime.now(timezone.utc) + timedelta(minutes=60)).isoformat()
+        query_db(
+            "UPDATE notification_outbox SET status = %s, last_error = %s, next_attempt_at = %s WHERE id = %s",
+            ("Retry", error, retry_at, notification_id),
+        )
+        app.logger.error("WhatsApp notification %s failed: %s", notification_id, error)
+        return False
+
+    try:
+        content = json.loads(notification["payload"])
+        response = requests.post(
+            f"https://graph.facebook.com/{os.getenv('WHATSAPP_GRAPH_VERSION', 'v22.0')}/{phone_number_id}/messages",
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+            json={
+                "messaging_product": "whatsapp",
+                "to": notification["recipient"],
+                "type": "template",
+                "biz_opaque_callback_data": notification["idempotency_key"],
+                "template": {
+                    "name": notification["template_name"],
+                    "language": {"code": notification["language_code"]},
+                    "components": [{
+                        "type": "body",
+                        "parameters": [
+                            {"type": "text", "text": value}
+                            for value in content["body_parameters"]
+                        ],
+                    }],
+                },
+            },
+            timeout=12,
+        )
+        response.raise_for_status()
+        provider_response = response.json()
+        messages = provider_response.get("messages") if isinstance(provider_response, dict) else None
+        message_id = messages[0].get("id") if messages and isinstance(messages[0], dict) else None
+        if not message_id:
+            raise ValueError("WhatsApp accepted no message identifier.")
+    except (requests.RequestException, ValueError, TypeError, KeyError) as error:
+        attempts = int(notification["attempts"])
+        retry = attempts < 8
+        next_attempt = (
+            datetime.now(timezone.utc) + timedelta(minutes=min(2 ** attempts, 360))
+        ).isoformat()
+        query_db(
+            """
+            UPDATE notification_outbox
+            SET status = %s, last_error = %s, next_attempt_at = %s
+            WHERE id = %s
+            """,
+            ("Retry" if retry else "Failed", str(error)[:500], next_attempt, notification_id),
+        )
+        app.logger.warning("WhatsApp delivery failed for outbox entry %s: %s", notification_id, error)
+        return False
+
+    query_db(
+        """
+        UPDATE notification_outbox
+        SET status = %s, provider_message_id = %s, sent_at = %s, last_error = NULL
+        WHERE id = %s
+        """,
+        ("Sent", message_id, datetime.now(timezone.utc).isoformat(), notification_id),
+    )
+    return True
+
+
+def _deliver_order_whatsapp_event(order_number, event_type, event_value=None):
+    inserted = _queue_whatsapp_order_event(order_number, event_type, event_value)
+    if inserted == 1:
+        entry = query_db(
+            "SELECT id FROM notification_outbox WHERE idempotency_key = %s",
+            (f"whatsapp:{event_type}:{order_number}:{event_value or ''}",),
+            one=True,
+        )
+        if entry:
+            _dispatch_whatsapp_notification(entry["id"])
+
+
+def _record_verified_payment(order_number, amount, reference):
+    now = datetime.now(timezone.utc).isoformat()
+    query_db(
+        """
+        INSERT INTO financial_transactions
+            (idempotency_key, transaction_type, category, amount, currency, reference, notes, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        """,
+        (
+            f"payment:{order_number}", "income", "sales", amount, "KES", reference,
+            "Verified payment", now,
+        ),
+    )
+    customer = query_db(
+        "SELECT customer_id FROM orders WHERE order_number = %s",
+        (order_number,),
+        one=True,
+    )
+    if not customer or not customer.get("customer_id"):
+        return
+    customer_id = customer["customer_id"]
+    points = int(Decimal(str(amount)) // Decimal("100"))
+    if points <= 0:
+        return
+    add_loyalty_points(customer_id, order_number, points, now)
+
+
+def _inventory_deduction_statements(order):
+    try:
+        order_items = json.loads(order.get("items") or "[]")
+    except (TypeError, ValueError):
+        raise ValueError("Order items could not be read for inventory deduction.") from None
+    requested = {}
+    for item in order_items:
+        name = item.get("name")
+        if not isinstance(name, str):
+            raise ValueError("Order contains an invalid menu item.")
+        quantity = Decimal(str(item.get("quantity", 1)))
+        if quantity <= 0 or quantity > 100:
+            raise ValueError("Order contains an invalid item quantity.")
+        recipes = query_db(
+            "SELECT inventory_item_id, quantity_per_serving FROM inventory_recipes "
+            "WHERE menu_item_name = %s",
+            (name,),
+        )
+        for recipe in recipes:
+            inventory_id = recipe["inventory_item_id"]
+            used = Decimal(str(recipe["quantity_per_serving"])) * quantity
+            requested[inventory_id] = requested.get(inventory_id, Decimal("0")) + used
+
+    statements = []
+    checked_indexes = {}
+    now = datetime.now(timezone.utc).isoformat()
+    for inventory_id, quantity in requested.items():
+        statements.append((
+            "UPDATE inventory_items SET quantity = quantity - %s, updated_at = %s "
+            "WHERE id = %s AND quantity >= %s",
+            (float(quantity), now, inventory_id, float(quantity)),
+        ))
+        checked_indexes[len(statements) - 1] = 1
+        statements.append((
+            """
+            INSERT INTO inventory_movements
+                (item_id, quantity, movement_type, reference, notes, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                inventory_id, -float(quantity), "order_usage",
+                order["order_number"], f"Ingredients used for {order['order_number']}", now,
+            ),
+        ))
+    return statements, checked_indexes
+
+
+def _write_audit(actor, action, entity_type, entity_id, details=None):
+    query_db(
+        """
+        INSERT INTO audit_logs (actor, action, entity_type, entity_id, details, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (
+            str(actor or "system")[:120], action[:80], entity_type[:80],
+            str(entity_id)[:120],
+            json.dumps(details, ensure_ascii=True) if details is not None else None,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
 
 
 def _pesapal_request_token():
@@ -616,7 +928,14 @@ def _pesapal_payment_status(order_tracking_id, merchant_reference):
     ]
     if order_update:
         updates.append(order_update)
-    execute_transaction(updates)
+    rowcounts = execute_transaction(updates)
+    if status == "Completed" and order_update and rowcounts[-1] == 1:
+        _record_verified_payment(
+            merchant_reference,
+            payment["amount"],
+            str(provider_status.get("confirmation_code") or ""),
+        )
+        _deliver_order_whatsapp_event(merchant_reference, "receipt")
     return {"status": status, "receipt": provider_status.get("confirmation_code")}, None
 
 
@@ -666,10 +985,23 @@ def home():
     )
     return render_template(
         "index.html",
+        language=(
+            request.args.get("lang")
+            if request.args.get("lang") in {"en", "sw"}
+            else session.get("preferred_language", "en")
+        ),
         menu_items=menu_items,
         added_menu_items=added_menu_items,
         stories=stories,
     )
+
+
+@app.route("/service-worker.js")
+def service_worker():
+    response = send_from_directory("static", "service-worker.js", mimetype="application/javascript")
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -795,19 +1127,54 @@ def login():
                 error="Please refresh the page and try again.",
                 csrf_token=session.setdefault("csrf_token", secrets.token_urlsafe(32)),
             ), 400
+        request_ip = request.remote_addr or "unknown"
+        now = datetime.now(timezone.utc)
+        attempt_cutoff = (now - timedelta(minutes=15)).isoformat()
+        query_db("DELETE FROM auth_attempts WHERE attempted_at < %s", ((now - timedelta(days=1)).isoformat(),))
+        attempts = query_db(
+            "SELECT COUNT(*) AS total FROM auth_attempts WHERE request_ip = %s AND attempted_at >= %s",
+            (request_ip, attempt_cutoff),
+            one=True,
+        )
+        if attempts["total"] >= 10:
+            return render_template(
+                "login.html",
+                error="Too many sign-in attempts. Please wait 15 minutes before trying again.",
+                csrf_token=session.get("csrf_token"),
+            ), 429
         configured_phone = _normalize_phone(os.getenv("ADMIN_PHONE"))
         submitted_phone = _normalize_phone(request.form.get("phone"))
         configured_password = os.getenv("ADMIN_PASSWORD")
         submitted_password = str(request.form.get("admin_password") or "")
-        if (
+        primary_admin = bool(
             configured_phone
             and configured_password
             and submitted_phone == configured_phone
             and hmac.compare_digest(submitted_password, configured_password)
-        ):
+        )
+        staff = query_db(
+            "SELECT id, fullname, phone, password_hash, role FROM staff_accounts "
+            "WHERE phone = %s AND active = %s",
+            (submitted_phone, True),
+            one=True,
+        ) if submitted_phone else None
+        staff_valid = bool(
+            staff
+            and staff["role"] in ROLE_PERMISSIONS
+            and check_password_hash(staff["password_hash"], submitted_password)
+        )
+        if primary_admin or staff_valid:
+            query_db("DELETE FROM auth_attempts WHERE request_ip = %s", (request_ip,))
             session.clear()
             session["is_admin"] = True
+            session["staff_role"] = "owner" if primary_admin else staff["role"]
+            session["staff_phone"] = submitted_phone
+            session["staff_name"] = "Vior Administrator" if primary_admin else staff["fullname"]
             return redirect(url_for("admin_dashboard"))
+        query_db(
+            "INSERT INTO auth_attempts (request_ip, attempted_at) VALUES (%s, %s)",
+            (request_ip, now.isoformat()),
+        )
         return render_template(
             "login.html",
             error="Staff sign in is unavailable or the credentials are incorrect.",
@@ -822,16 +1189,209 @@ def logout():
     return redirect(url_for("index"))
 
 
+@app.route("/account")
+def customer_account():
+    customer_id = session.get("customer_id")
+    if not customer_id:
+        return redirect(url_for("customer_login"))
+    profile = query_db(
+        "SELECT id, fullname, phone, email, preferred_language, whatsapp_opt_in FROM users WHERE id = %s",
+        (customer_id,),
+        one=True,
+    )
+    if not profile:
+        session.clear()
+        return redirect(url_for("customer_login"))
+    orders = query_db(
+        "SELECT order_number, items, order_type, amount, status, status_updated_at "
+        "FROM orders WHERE customer_id = %s ORDER BY id DESC LIMIT 50",
+        (customer_id,),
+    )
+    for order in orders:
+        paid = query_db(
+            "SELECT id FROM payments WHERE order_number = %s AND status = %s ORDER BY id DESC",
+            (order["order_number"], "Completed"),
+            one=True,
+        )
+        if paid:
+            receipt_token = URLSafeTimedSerializer(
+                app.secret_key, salt="vior-order-receipt"
+            ).dumps({"order_number": order["order_number"]})
+            order["receipt_url"] = url_for(
+                "customer_receipt",
+                order_number=order["order_number"],
+                token=receipt_token,
+            )
+    loyalty = query_db(
+        "SELECT points_balance FROM loyalty_accounts WHERE customer_id = %s",
+        (customer_id,),
+        one=True,
+    )
+    addresses = query_db(
+        "SELECT * FROM customer_addresses WHERE customer_id = %s ORDER BY is_default DESC, id DESC",
+        (customer_id,),
+    )
+    return render_template(
+        "account.html",
+        profile=profile,
+        orders=orders,
+        loyalty=loyalty,
+        addresses=addresses,
+        csrf_token=session.setdefault("csrf_token", secrets.token_urlsafe(32)),
+    )
+
+
+@app.route("/account/profile", methods=["POST"])
+def update_customer_profile():
+    customer_id = session.get("customer_id")
+    if not customer_id:
+        return redirect(url_for("customer_login"))
+    if not _valid_csrf_token():
+        return "Please refresh the page and try again.", 400
+    email = str(request.form.get("email") or "").strip().casefold()
+    language = str(request.form.get("preferred_language") or "en")
+    whatsapp_opt_in = request.form.get("whatsapp_opt_in") == "on"
+    if email and (
+        len(email) > 254
+        or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)
+    ):
+        return "Enter a valid email address.", 400
+    if language not in {"en", "sw"}:
+        return "Choose English or Kiswahili.", 400
+    query_db(
+        "UPDATE users SET email = %s, preferred_language = %s, whatsapp_opt_in = %s WHERE id = %s",
+        (email or None, language, whatsapp_opt_in, customer_id),
+    )
+    session["preferred_language"] = language
+    return redirect(url_for("customer_account"))
+
+
+@app.route("/account/addresses", methods=["POST"])
+def save_customer_address():
+    customer_id = session.get("customer_id")
+    if not customer_id:
+        return redirect(url_for("customer_login"))
+    if not _valid_csrf_token():
+        return "Please refresh the page and try again.", 400
+    label = str(request.form.get("label") or "").strip()
+    address = str(request.form.get("address") or "").strip()
+    locality = str(request.form.get("locality") or "").strip()
+    region = str(request.form.get("region") or "").strip()
+    postal_code = str(request.form.get("postal_code") or "").strip()
+    country = str(request.form.get("country") or "").strip()
+    if (
+        len(label) < 1 or len(label) > 40 or len(address) > 250 or not address
+        or len(locality) > 100 or not locality or len(region) > 100
+        or len(postal_code) > 20 or not postal_code or len(country) > 80 or not country
+    ):
+        return "Check the address details and try again.", 400
+    now = datetime.now(timezone.utc).isoformat()
+    is_default = request.form.get("is_default") == "on"
+    statements = []
+    if is_default:
+        statements.append(
+            ("UPDATE customer_addresses SET is_default = %s WHERE customer_id = %s", (False, customer_id))
+        )
+    statements.append((
+        """
+        INSERT INTO customer_addresses
+            (customer_id, label, address, locality, region, postal_code, country, is_default, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (customer_id, label, address, locality, region, postal_code, country, is_default, now),
+    ))
+    execute_transaction(statements)
+    return redirect(url_for("customer_account"))
+
+
+@app.route("/receipt/<order_number>")
+def customer_receipt(order_number):
+    token = request.args.get("token", "")
+    try:
+        receipt_claim = URLSafeTimedSerializer(
+            app.secret_key, salt="vior-order-receipt"
+        ).loads(token, max_age=30 * 24 * 60 * 60)
+    except (BadSignature, SignatureExpired):
+        return "This receipt link is invalid or has expired.", 403
+    if not isinstance(receipt_claim, dict) or receipt_claim.get("order_number") != order_number:
+        return "This receipt link is invalid.", 403
+    order = query_db(
+        "SELECT order_number, items, order_type, amount, status, delivery_time "
+        "FROM orders WHERE order_number = %s",
+        (order_number,),
+        one=True,
+    )
+    payment = query_db(
+        "SELECT provider, receipt, status, updated_at FROM payments "
+        "WHERE order_number = %s AND status = %s ORDER BY id DESC",
+        (order_number, "Completed"),
+        one=True,
+    )
+    if not order or not payment:
+        return "A verified receipt is not available for this order.", 404
+    try:
+        items = json.loads(order["items"] or "[]")
+    except (TypeError, ValueError):
+        app.logger.exception("Could not decode receipt items for order %s", order_number)
+        return "Receipt details are temporarily unavailable.", 500
+    return render_template(
+        "receipt.html",
+        order=order,
+        payment=payment,
+        items=items,
+        item_total=sum(Decimal(str(item.get("price", 0))) for item in items),
+        delivery_fee=Decimal("0"),
+    )
+
+
+@app.route("/api/cron/notifications", methods=["GET", "POST"])
+def retry_notifications():
+    cron_secret = os.getenv("CRON_SECRET")
+    authorization = request.headers.get("Authorization", "")
+    if not cron_secret or not hmac.compare_digest(authorization, f"Bearer {cron_secret}"):
+        return jsonify({"error": "Not authorized."}), 401
+    now = datetime.now(timezone.utc).isoformat()
+    stale_before = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()
+    query_db(
+        "UPDATE notification_outbox SET status = %s, next_attempt_at = %s "
+        "WHERE status = %s AND next_attempt_at < %s",
+        ("Retry", now, "Sending", stale_before),
+    )
+    pending = query_db(
+        "SELECT id FROM notification_outbox WHERE status IN (%s, %s) "
+        "AND next_attempt_at <= %s ORDER BY id LIMIT 25",
+        ("Pending", "Retry", now),
+    )
+    sent = sum(_dispatch_whatsapp_notification(entry["id"]) for entry in pending)
+    return jsonify({"processed": len(pending), "sent": sent})
+
+
 @app.route("/cart")
 def cart():
     session.setdefault("cart_id", secrets.token_urlsafe(12))
-    return render_template("cart.html")
+    saved_addresses = query_db(
+        "SELECT id, label, address, locality, region, postal_code, country "
+        "FROM customer_addresses WHERE customer_id = %s ORDER BY is_default DESC, id DESC",
+        (session["customer_id"],),
+    ) if session.get("customer_id") else []
+    return render_template(
+        "cart.html",
+        saved_addresses=saved_addresses,
+        language=session.get("preferred_language", "en"),
+    )
 
 
 @app.route("/admin")
 def admin_dashboard():
     if not _is_admin():
         return redirect(url_for("login"))
+    role = session.get("staff_role", "owner")
+    can_manage_orders = _has_permission("orders")
+    can_manage_content = _has_permission("content")
+    can_manage_inventory = _has_permission("inventory")
+    can_view_finance = _has_permission("finance")
+    can_manage_customers = _has_permission("customers")
+    can_manage_staff = _has_permission("staff")
     csrf_token = session.setdefault("csrf_token", secrets.token_urlsafe(32))
     orders = query_db("SELECT * FROM orders ORDER BY id DESC")
     for order in orders:
@@ -843,20 +1403,81 @@ def admin_dashboard():
         except (TypeError, ValueError, KeyError):
             app.logger.exception("Could not decode items for order %s", order.get("order_number"))
             order["items"] = "Order details unavailable"
-    menu_items = query_db("SELECT * FROM menu_items ORDER BY id DESC")
-    stories = query_db("SELECT * FROM stories ORDER BY id DESC")
+    menu_items = query_db("SELECT * FROM menu_items ORDER BY id DESC") if can_manage_content else []
+    recipe_menu_items = MENU_ITEMS + menu_items if can_manage_inventory else []
+    stories = query_db("SELECT * FROM stories ORDER BY id DESC") if can_manage_content else []
+    inventory_items = query_db("SELECT * FROM inventory_items ORDER BY name") if can_manage_inventory else []
+    suppliers = query_db("SELECT * FROM suppliers ORDER BY name") if can_manage_inventory else []
+    recipes = query_db("SELECT * FROM inventory_recipes ORDER BY menu_item_name") if can_manage_inventory else []
+    financial_transactions = query_db(
+        "SELECT * FROM financial_transactions ORDER BY id DESC LIMIT 100"
+    ) if can_view_finance else []
+    delivery_assignments = query_db(
+        "SELECT * FROM delivery_assignments ORDER BY id DESC LIMIT 50"
+    ) if _has_permission("delivery") else []
+    notification_entries = query_db(
+        "SELECT id, recipient, template_name, status, attempts, last_error, created_at "
+        "FROM notification_outbox ORDER BY id DESC LIMIT 50"
+    ) if role in {"owner", "manager"} else []
+    totals = query_db(
+        """
+        SELECT
+            COALESCE(SUM(CASE WHEN transaction_type = %s THEN amount ELSE 0 END), 0) AS revenue,
+            COALESCE(SUM(CASE WHEN transaction_type = %s THEN amount ELSE 0 END), 0) AS expenses,
+            COALESCE(SUM(CASE WHEN transaction_type = %s THEN amount ELSE 0 END), 0) AS refunds
+        FROM financial_transactions
+        """,
+        ("income", "expense", "refund"),
+        one=True,
+    ) if can_view_finance else {"revenue": 0, "expenses": 0, "refunds": 0}
+    staff_accounts = query_db(
+        "SELECT id, fullname, phone, role, active, created_at FROM staff_accounts ORDER BY id DESC"
+    ) if can_manage_staff else []
+    customers = query_db(
+        """
+        SELECT u.id, u.fullname, u.phone, u.email, u.preferred_language,
+            COALESCE(l.points_balance, 0) AS points_balance,
+            (SELECT COUNT(*) FROM orders o WHERE o.customer_id = u.id) AS order_count
+        FROM users u LEFT JOIN loyalty_accounts l ON l.customer_id = u.id
+        ORDER BY u.id DESC LIMIT 100
+        """
+    ) if can_manage_customers else []
+    low_stock_items = [
+        item for item in inventory_items
+        if float(item["quantity"]) <= float(item["reorder_level"])
+    ]
     return render_template(
         "admin.html",
-        orders=orders,
+        orders=orders if can_manage_orders else [],
         menu_items=menu_items,
+        recipe_menu_items=recipe_menu_items,
         stories=stories,
+        inventory_items=inventory_items,
+        recipes=recipes,
+        low_stock_items=low_stock_items,
+        suppliers=suppliers,
+        financial_transactions=financial_transactions,
+        delivery_assignments=delivery_assignments,
+        notification_entries=notification_entries,
+        finance_totals=totals,
+        staff_accounts=staff_accounts,
+        customers=customers,
+        staff_role=role,
+        staff_name=session.get("staff_name", "Staff"),
+        can_manage_orders=can_manage_orders,
+        can_manage_content=can_manage_content,
+        can_manage_inventory=can_manage_inventory,
+        can_view_finance=can_view_finance,
+        can_manage_customers=can_manage_customers,
+        can_manage_staff=can_manage_staff,
+        expense_idempotency_key=secrets.token_urlsafe(24),
         csrf_token=csrf_token,
     )
 
 
 @app.route("/api/admin/media-signature", methods=["POST"])
 def admin_media_signature():
-    if not _is_admin():
+    if not _has_permission("content"):
         return jsonify({"error": "Staff sign-in is required."}), 401
     data = _json_data()
     if not data:
@@ -892,7 +1513,7 @@ def admin_media_signature():
 
 @app.route("/admin/menu", methods=["POST"])
 def save_admin_menu_item():
-    if not _is_admin():
+    if not _has_permission("content"):
         return redirect(url_for("login"))
     if not _valid_csrf_token():
         return "Please refresh the page and try again.", 400
@@ -936,12 +1557,20 @@ def save_admin_menu_item():
             """,
             (name, description, category, price, media_url, media_type, True, now),
         )
+        existing = query_db("SELECT id FROM menu_items WHERE name = %s", (name,), one=True)
+    _write_audit(
+        session.get("staff_phone", "primary-admin"),
+        "menu_item_saved",
+        "menu_item",
+        existing["id"],
+        {"name": name, "price": price, "active": True},
+    )
     return redirect(url_for("admin_dashboard") + "#menu-management")
 
 
 @app.route("/admin/menu/<int:item_id>/availability", methods=["POST"])
 def toggle_admin_menu_item(item_id):
-    if not _is_admin():
+    if not _has_permission("content"):
         return redirect(url_for("login"))
     if not _valid_csrf_token():
         return "Please refresh the page and try again.", 400
@@ -952,12 +1581,13 @@ def toggle_admin_menu_item(item_id):
     )
     if changed != 1:
         return "Dish not found.", 404
+    _write_audit(session.get("staff_phone", "primary-admin"), "menu_item_availability_changed", "menu_item", item_id, {"active": active})
     return redirect(url_for("admin_dashboard") + "#menu-management")
 
 
 @app.route("/admin/stories", methods=["POST"])
 def save_admin_story():
-    if not _is_admin():
+    if not _has_permission("content"):
         return redirect(url_for("login"))
     if not _valid_csrf_token():
         return "Please refresh the page and try again.", 400
@@ -1008,12 +1638,24 @@ def save_admin_story():
             datetime.now(timezone.utc).isoformat(),
         ),
     )
+    saved_story = query_db(
+        "SELECT id FROM stories WHERE title = %s ORDER BY id DESC",
+        (title,),
+        one=True,
+    )
+    _write_audit(
+        session.get("staff_phone", "primary-admin"),
+        "story_published",
+        "story",
+        saved_story["id"],
+        {"title": title, "published": published},
+    )
     return redirect(url_for("admin_dashboard") + "#story-management")
 
 
 @app.route("/admin/stories/<int:story_id>/availability", methods=["POST"])
 def toggle_admin_story(story_id):
-    if not _is_admin():
+    if not _has_permission("content"):
         return redirect(url_for("login"))
     if not _valid_csrf_token():
         return "Please refresh the page and try again.", 400
@@ -1024,12 +1666,429 @@ def toggle_admin_story(story_id):
     )
     if changed != 1:
         return "Story not found.", 404
+    _write_audit(session.get("staff_phone", "primary-admin"), "story_visibility_changed", "story", story_id, {"published": published})
     return redirect(url_for("admin_dashboard") + "#story-management")
+
+
+@app.route("/admin/suppliers", methods=["POST"])
+def save_supplier():
+    if not _has_permission("inventory"):
+        return redirect(url_for("login"))
+    if not _valid_csrf_token():
+        return "Please refresh the page and try again.", 400
+    name = str(request.form.get("name") or "").strip()
+    phone = str(request.form.get("phone") or "").strip()
+    email = str(request.form.get("email") or "").strip()
+    notes = str(request.form.get("notes") or "").strip()
+    if not name or len(name) > 120 or len(phone) > 40 or len(email) > 254 or len(notes) > 500:
+        return "Check the supplier details and try again.", 400
+    query_db(
+        "INSERT INTO suppliers (name, phone, email, notes, created_at) VALUES (%s, %s, %s, %s, %s)",
+        (name, phone or None, email or None, notes or None, datetime.now(timezone.utc).isoformat()),
+    )
+    supplier = query_db("SELECT id FROM suppliers WHERE name = %s ORDER BY id DESC", (name,), one=True)
+    _write_audit(session.get("staff_phone", "primary-admin"), "supplier_created", "supplier", supplier["id"], {"name": name})
+    return redirect(url_for("admin_dashboard") + "#inventory-management")
+
+
+@app.route("/admin/inventory/items", methods=["POST"])
+def save_inventory_item():
+    if not _has_permission("inventory"):
+        return redirect(url_for("login"))
+    if not _valid_csrf_token():
+        return "Please refresh the page and try again.", 400
+    name = str(request.form.get("name") or "").strip()
+    unit = str(request.form.get("unit") or "").strip()
+    try:
+        quantity = Decimal(str(request.form.get("quantity") or "0"))
+        reorder_level = Decimal(str(request.form.get("reorder_level") or "0"))
+        unit_cost = Decimal(str(request.form.get("unit_cost") or "0"))
+        if not all(value.is_finite() for value in (quantity, reorder_level, unit_cost)):
+            raise InvalidOperation
+    except (InvalidOperation, ValueError):
+        return "Enter valid stock quantities and unit cost.", 400
+    if (
+        len(name) < 2 or len(name) > 120 or not unit or len(unit) > 30
+        or quantity < 0 or reorder_level < 0 or unit_cost < 0
+    ):
+        return "Check the stock item details and try again.", 400
+    if query_db("SELECT id FROM inventory_items WHERE name = %s", (name,), one=True):
+        return "An inventory item with that name already exists.", 409
+    now = datetime.now(timezone.utc).isoformat()
+    query_db(
+        """
+        INSERT INTO inventory_items (name, unit, quantity, reorder_level, unit_cost, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (name, unit, float(quantity), float(reorder_level), float(unit_cost), now),
+    )
+    saved_item = query_db("SELECT id FROM inventory_items WHERE name = %s", (name,), one=True)
+    if not saved_item:
+        raise RuntimeError("The new inventory item could not be loaded after it was saved.")
+    item_id = saved_item["id"]
+    if quantity > 0:
+        query_db(
+            """
+            INSERT INTO inventory_movements
+                (item_id, quantity, movement_type, reference, notes, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (item_id, float(quantity), "opening_balance", None, "Opening stock", now),
+        )
+    _write_audit(session.get("staff_phone", "primary-admin"), "inventory_item_created", "inventory_item", item_id, {"name": name})
+    return redirect(url_for("admin_dashboard") + "#inventory-management")
+
+
+@app.route("/admin/inventory/purchase", methods=["POST"])
+def record_inventory_purchase():
+    if not _has_permission("inventory"):
+        return redirect(url_for("login"))
+    if not _valid_csrf_token():
+        return "Please refresh the page and try again.", 400
+    try:
+        item_id = int(request.form.get("item_id") or "")
+        supplier_id = int(request.form.get("supplier_id") or "")
+        quantity = Decimal(str(request.form.get("quantity") or ""))
+        unit_cost = Decimal(str(request.form.get("unit_cost") or ""))
+        if not quantity.is_finite() or not unit_cost.is_finite():
+            raise InvalidOperation
+    except (InvalidOperation, ValueError):
+        return "Enter a valid item, supplier, quantity, and unit cost.", 400
+    reference = str(request.form.get("reference") or "").strip()
+    if (
+        quantity <= 0 or unit_cost < 0 or quantity > Decimal("1000000")
+        or unit_cost > Decimal("100000000") or not re.fullmatch(r"[A-Za-z0-9._:-]{8,100}", reference)
+    ):
+        return "Enter a positive quantity, valid unit cost, and unique purchase reference.", 400
+    if not query_db("SELECT id FROM inventory_items WHERE id = %s", (item_id,), one=True):
+        return "Inventory item not found.", 404
+    if not query_db("SELECT id FROM suppliers WHERE id = %s", (supplier_id,), one=True):
+        return "Supplier not found.", 404
+
+    now = datetime.now(timezone.utc).isoformat()
+    total_cost = quantity * unit_cost
+    statements = [
+        (
+            """
+            INSERT INTO financial_transactions
+                (idempotency_key, transaction_type, category, amount, currency, reference, notes, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (idempotency_key) DO NOTHING
+            """,
+            (
+                f"supplier_purchase:{reference}", "expense", "inventory",
+                float(total_cost), "KES", reference, f"Supplier purchase · supplier {supplier_id}", now,
+            ),
+        ),
+        (
+            "UPDATE inventory_items SET quantity = quantity + %s, unit_cost = %s, updated_at = %s WHERE id = %s",
+            (float(quantity), float(unit_cost), now, item_id),
+        ),
+        (
+            """
+            INSERT INTO inventory_movements
+                (item_id, supplier_id, quantity, unit_cost, movement_type, reference, notes, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                item_id, supplier_id, float(quantity), float(unit_cost),
+                "purchase", reference, "Supplier stock purchase", now,
+            ),
+        ),
+    ]
+    try:
+        execute_transaction_checked(statements, {0: 1, 1: 1})
+    except RuntimeError:
+        return "That purchase reference has already been recorded; stock was not changed.", 409
+    _write_audit(session.get("staff_phone", "primary-admin"), "inventory_purchase_recorded", "inventory_item", item_id, {"reference": reference, "quantity": float(quantity)})
+    return redirect(url_for("admin_dashboard") + "#inventory-management")
+
+
+@app.route("/admin/inventory/movement", methods=["POST"])
+def record_inventory_movement():
+    if not _has_permission("inventory"):
+        return redirect(url_for("login"))
+    if not _valid_csrf_token():
+        return "Please refresh the page and try again.", 400
+    try:
+        item_id = int(request.form.get("item_id") or "")
+        quantity = Decimal(str(request.form.get("quantity") or ""))
+        if not quantity.is_finite():
+            raise InvalidOperation
+    except (InvalidOperation, ValueError):
+        return "Enter a valid inventory item and quantity.", 400
+    movement_type = str(request.form.get("movement_type") or "")
+    notes = str(request.form.get("notes") or "").strip()
+    if movement_type not in {"waste", "adjustment"} or quantity <= 0 or quantity > Decimal("1000000"):
+        return "Choose wastage or a positive stock correction quantity.", 400
+    item = query_db("SELECT id, quantity FROM inventory_items WHERE id = %s", (item_id,), one=True)
+    if not item:
+        return "Inventory item not found.", 404
+    adjustment = -float(quantity) if movement_type == "waste" else float(quantity)
+    now = datetime.now(timezone.utc).isoformat()
+    statements = [
+        (
+            "UPDATE inventory_items SET quantity = quantity + %s, updated_at = %s WHERE id = %s AND quantity + %s >= 0",
+            (adjustment, now, item_id, adjustment),
+        ),
+        (
+            """
+            INSERT INTO inventory_movements
+                (item_id, quantity, movement_type, notes, created_at)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (item_id, adjustment, movement_type, notes or None, now),
+        ),
+    ]
+    try:
+        execute_transaction_checked(statements, {0: 1})
+    except RuntimeError:
+        return "This stock movement would make the inventory balance negative.", 409
+    _write_audit(session.get("staff_phone", "primary-admin"), "inventory_movement_recorded", "inventory_item", item_id, {"type": movement_type, "quantity": adjustment})
+    return redirect(url_for("admin_dashboard") + "#inventory-management")
+
+
+@app.route("/admin/inventory/recipes", methods=["POST"])
+def save_inventory_recipe():
+    if not _has_permission("inventory"):
+        return redirect(url_for("login"))
+    if not _valid_csrf_token():
+        return "Please refresh the page and try again.", 400
+    menu_item_name = str(request.form.get("menu_item_name") or "").strip()
+    try:
+        inventory_item_id = int(request.form.get("inventory_item_id") or "")
+        quantity = Decimal(str(request.form.get("quantity_per_serving") or ""))
+        if not quantity.is_finite():
+            raise InvalidOperation
+    except (InvalidOperation, ValueError):
+        return "Enter a valid ingredient and quantity per serving.", 400
+    if (
+        (menu_item_name not in MENU_PRICES and not query_db(
+            "SELECT id FROM menu_items WHERE name = %s AND active = %s",
+            (menu_item_name, True),
+            one=True,
+        ))
+        or quantity <= 0 or quantity > Decimal("1000000")
+    ):
+        return "Choose an available menu item and a positive ingredient quantity.", 400
+    if not query_db("SELECT id FROM inventory_items WHERE id = %s", (inventory_item_id,), one=True):
+        return "Inventory item not found.", 404
+    query_db(
+        """
+        INSERT INTO inventory_recipes (menu_item_name, inventory_item_id, quantity_per_serving)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (menu_item_name, inventory_item_id)
+        DO UPDATE SET quantity_per_serving = excluded.quantity_per_serving
+        """,
+        (menu_item_name, inventory_item_id, float(quantity)),
+    )
+    _write_audit(session.get("staff_phone", "primary-admin"), "recipe_updated", "menu_item", menu_item_name, {"inventory_item_id": inventory_item_id, "quantity_per_serving": float(quantity)})
+    return redirect(url_for("admin_dashboard") + "#inventory-management")
+
+
+@app.route("/admin/expenses", methods=["POST"])
+def record_expense():
+    if not _has_permission("finance"):
+        return redirect(url_for("login"))
+    if not _valid_csrf_token():
+        return "Please refresh the page and try again.", 400
+    category = str(request.form.get("category") or "").strip()
+    notes = str(request.form.get("notes") or "").strip()
+    reference = str(request.form.get("reference") or "").strip()
+    try:
+        amount = Decimal(str(request.form.get("amount") or ""))
+        if not amount.is_finite():
+            raise InvalidOperation
+    except (InvalidOperation, ValueError):
+        return "Enter a valid expense amount.", 400
+    if (
+        amount <= 0 or amount > Decimal("1000000000")
+        or not category or len(category) > 80 or len(notes) > 500
+        or not re.fullmatch(r"[A-Za-z0-9._:-]{16,100}", reference)
+    ):
+        return "Check the expense category, amount, notes, and reference.", 400
+    query_db(
+        """
+        INSERT INTO financial_transactions
+            (idempotency_key, transaction_type, category, amount, currency, reference, notes, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        """,
+        (
+            f"expense:{reference}", "expense", category, float(amount),
+            "KES", reference, notes or None, datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+    if result != 1:
+        return "That expense reference has already been recorded.", 409
+    _write_audit(session.get("staff_phone", "primary-admin"), "expense_recorded", "financial_transaction", reference, {"category": category, "amount": float(amount)})
+    return redirect(url_for("admin_dashboard") + "#finance-management")
+
+
+@app.route("/admin/refunds", methods=["POST"])
+def record_refund():
+    if not _has_permission("finance"):
+        return "Finance access is required.", 403
+    if not _valid_csrf_token():
+        return "Please refresh the page and try again.", 400
+    order_number = str(request.form.get("order_number") or "").strip()
+    reference = str(request.form.get("reference") or "").strip()
+    try:
+        amount = Decimal(str(request.form.get("amount") or ""))
+        if not amount.is_finite():
+            raise InvalidOperation
+    except (InvalidOperation, ValueError):
+        return "Enter a valid refund amount.", 400
+    payment = query_db(
+        "SELECT amount FROM payments WHERE order_number = %s AND status = %s ORDER BY id DESC",
+        (order_number, "Completed"),
+        one=True,
+    )
+    if not payment:
+        return "A verified payment is required before recording a refund.", 409
+    if amount <= 0 or amount > Decimal(str(payment["amount"])):
+        return "The refund must be positive and no greater than the verified payment.", 400
+    if (
+        len(reference) < 8 or len(reference) > 100
+        or not re.fullmatch(r"[A-Za-z0-9._:-]{8,100}", reference)
+    ):
+        return "Enter the provider's refund reference.", 400
+    result = query_db(
+        """
+        INSERT INTO financial_transactions
+            (idempotency_key, transaction_type, category, amount, currency, reference, notes, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        """,
+        (
+            f"refund:{order_number}", "refund", "customer_refund",
+            float(amount), "KES", reference, order_number,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+    if result != 1:
+        return "A refund has already been recorded against this order.", 409
+    _write_audit(
+        session.get("staff_phone", "primary-admin"),
+        "refund_recorded",
+        "order",
+        order_number,
+        {"reference": reference, "amount": float(amount)},
+    )
+    return redirect(url_for("admin_dashboard") + "#finance-management")
+
+
+@app.route("/admin/order/<order_number>/delivery", methods=["POST"])
+def assign_delivery(order_number):
+    if not _has_permission("delivery"):
+        return redirect(url_for("login"))
+    if not _valid_csrf_token():
+        return "Please refresh the page and try again.", 400
+    driver_name = str(request.form.get("driver_name") or "").strip()
+    driver_phone = _normalize_phone(request.form.get("driver_phone"))
+    order = query_db("SELECT order_number, status FROM orders WHERE order_number = %s", (order_number,), one=True)
+    if not order:
+        return "Order not found.", 404
+    if order["status"] not in {"Preparing", "Out for Delivery"}:
+        return "Assign a driver when the order is being prepared or dispatched.", 409
+    if len(driver_name) < 2 or len(driver_name) > 80 or not driver_phone:
+        return "Enter a driver name and valid Kenyan phone number.", 400
+    now = datetime.now(timezone.utc).isoformat()
+    query_db(
+        """
+        INSERT INTO delivery_assignments
+            (order_number, driver_name, driver_phone, status, assigned_by, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (order_number) DO UPDATE SET
+            driver_name = excluded.driver_name, driver_phone = excluded.driver_phone,
+            status = excluded.status, assigned_by = excluded.assigned_by,
+            updated_at = excluded.updated_at
+        """,
+        (
+            order_number, driver_name, driver_phone, "Assigned",
+            session.get("staff_phone", "primary-admin"), now, now,
+        ),
+    )
+    _write_audit(session.get("staff_phone", "primary-admin"), "delivery_assigned", "order", order_number, {"driver": driver_name})
+    return redirect(url_for("admin_dashboard"))
+
+
+@app.route("/admin/finance.csv")
+def export_financial_records():
+    if not _has_permission("finance"):
+        return redirect(url_for("login"))
+    transactions = query_db(
+        "SELECT idempotency_key, transaction_type, category, amount, currency, reference, notes, created_at "
+        "FROM financial_transactions ORDER BY created_at DESC"
+    )
+    output = io.StringIO()
+    output.write("idempotency_key,transaction_type,category,amount,currency,reference,notes,created_at\n")
+    for row in transactions:
+        output.write(",".join(
+            '"' + str(row.get(key) or "").replace('"', '""') + '"'
+            for key in ("idempotency_key", "transaction_type", "category", "amount", "currency", "reference", "notes", "created_at")
+        ) + "\n")
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=vior-financial-records.csv"},
+    )
+
+
+@app.route("/admin/staff", methods=["POST"])
+def create_staff_account():
+    if not _has_permission("staff"):
+        return "Only an owner can manage staff accounts.", 403
+    if not _valid_csrf_token():
+        return "Please refresh the page and try again.", 400
+    fullname = str(request.form.get("fullname") or "").strip()
+    phone = _normalize_phone(request.form.get("phone"))
+    password = str(request.form.get("password") or "")
+    role = str(request.form.get("role") or "")
+    if len(fullname) < 2 or len(fullname) > 80 or not phone:
+        return "Enter a staff name and valid Kenyan mobile number.", 400
+    if role not in ROLE_PERMISSIONS or role == "owner":
+        return "Choose a supported non-owner staff role.", 400
+    if len(password) < 12 or len(password) > 256:
+        return "Staff passwords must be at least 12 characters.", 400
+    if query_db("SELECT id FROM staff_accounts WHERE phone = %s", (phone,), one=True):
+        return "A staff account already exists for that number.", 409
+    result = query_db(
+        """
+        INSERT INTO staff_accounts
+            (fullname, phone, password_hash, role, active, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (
+            fullname, phone, generate_password_hash(password), role, True,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+    staff = query_db("SELECT id FROM staff_accounts WHERE phone = %s", (phone,), one=True)
+    _write_audit(session.get("staff_phone", "primary-admin"), "staff_created", "staff", staff["id"], {"role": role})
+    return redirect(url_for("admin_dashboard") + "#staff-management")
+
+
+@app.route("/admin/staff/<int:staff_id>/availability", methods=["POST"])
+def toggle_staff_account(staff_id):
+    if not _has_permission("staff"):
+        return "Only an owner can manage staff accounts.", 403
+    if not _valid_csrf_token():
+        return "Please refresh the page and try again.", 400
+    active = request.form.get("active") == "true"
+    changed = query_db(
+        "UPDATE staff_accounts SET active = %s WHERE id = %s",
+        (active, staff_id),
+    )
+    if changed != 1:
+        return "Staff account not found.", 404
+    _write_audit(session.get("staff_phone", "primary-admin"), "staff_access_changed", "staff", staff_id, {"active": active})
+    return redirect(url_for("admin_dashboard") + "#staff-management")
 
 
 @app.route("/admin/order/<int:order_id>/status", methods=["POST"], endpoint="update_order_status")
 def update_order_status(order_id):
-    if not _is_admin():
+    if not _has_permission("orders"):
         return redirect(url_for("login"))
     csrf_token = session.get("csrf_token")
     if not csrf_token or not hmac.compare_digest(
@@ -1040,7 +2099,11 @@ def update_order_status(order_id):
     if requested_status not in ORDER_STATUSES:
         return "Invalid order status.", 400
 
-    order = query_db("SELECT status FROM orders WHERE id = %s", (order_id,), one=True)
+    order = query_db(
+        "SELECT status, order_number, amount, items FROM orders WHERE id = %s",
+        (order_id,),
+        one=True,
+    )
     if not order:
         return "Order not found.", 404
     current = order["status"]
@@ -1063,6 +2126,17 @@ def update_order_status(order_id):
             (requested_status, now, order_id),
         )
     ]
+    checked_indexes = {0: 1}
+    if requested_status == "Preparing":
+        try:
+            inventory_updates, inventory_checks = _inventory_deduction_statements(order)
+        except ValueError as error:
+            return str(error), 409
+        offset = len(updates)
+        updates.extend(inventory_updates)
+        checked_indexes.update({
+            index + offset: expected for index, expected in inventory_checks.items()
+        })
     if current == "Awaiting Till Payment — verify manually" and requested_status == "Payment Verified":
         updates.append((
             "UPDATE payments SET status = %s, provider_status = %s, updated_at = %s "
@@ -1070,7 +2144,30 @@ def update_order_status(order_id):
             "AND provider = %s",
             ("Completed", "Verified by staff", now, order_id, "manual_till"),
         ))
-    execute_transaction(updates)
+    try:
+        execute_transaction_checked(updates, checked_indexes)
+    except RuntimeError as error:
+        app.logger.info("Order or inventory changed during status update %s: %s", order_id, error)
+        return "Insufficient inventory or order status changed; refresh and try again.", 409
+    _write_audit(
+        session.get("staff_phone", "primary-admin"),
+        "order_status_changed",
+        "order",
+        order["order_number"],
+        {"from": current, "to": requested_status},
+    )
+    if current == "Awaiting Till Payment — verify manually" and requested_status == "Payment Verified":
+        payment = query_db(
+            "SELECT receipt FROM payments WHERE order_number = %s AND provider = %s "
+            "AND status = %s ORDER BY id DESC",
+            (order["order_number"], "manual_till", "Completed"),
+            one=True,
+        )
+        if payment:
+            _record_verified_payment(order["order_number"], order["amount"], payment.get("receipt") or "Till verified by staff")
+            _deliver_order_whatsapp_event(order["order_number"], "receipt")
+    elif requested_status in {"Preparing", "Out for Delivery", "Delivered"}:
+        _deliver_order_whatsapp_event(order["order_number"], "status", requested_status)
     return redirect(url_for("admin_dashboard"))
 
 

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Receipt {{ order.order_number }} - Vior Hotel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="page-shell receipt-page">
+    <main class="container receipt-card">
+        <p class="eyebrow eyebrow-red">Time for Food</p>
+        <h1>Vior Hotel</h1>
+        <p>Payment receipt</p>
+        <dl class="receipt-meta">
+            <div><dt>Order</dt><dd>{{ order.order_number }}</dd></div>
+            <div><dt>Date</dt><dd>{{ payment.updated_at }}</dd></div>
+            <div><dt>Payment method</dt><dd>{{ 'Pesapal / M-Pesa' if payment.provider == 'pesapal' else 'M-Pesa Till' }}</dd></div>
+            <div><dt>Payment status</dt><dd>{{ payment.status }}</dd></div>
+            <div><dt>Payment reference</dt><dd>{{ payment.receipt or 'Verified by staff' }}</dd></div>
+            <div><dt>Order type</dt><dd>{{ order.order_type }}</dd></div>
+        </dl>
+        <div class="table-wrap">
+            <table class="orders-table receipt-items">
+                <thead><tr><th>Item</th><th>Qty</th><th>Price</th><th>Amount</th></tr></thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td>{{ item.name }}</td>
+                        <td>{{ item.get('quantity', 1) }}</td>
+                        <td>KES {{ '%.2f'|format(item.price) }}</td>
+                        <td>KES {{ '%.2f'|format(item.price * item.get('quantity', 1)) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr><th colspan="3">Items</th><td>KES {{ '%.2f'|format(item_total) }}</td></tr>
+                    <tr><th colspan="3">Delivery charge</th><td>KES {{ '%.2f'|format(delivery_fee) }}</td></tr>
+                    <tr><th colspan="3">Total paid</th><td><strong>KES {{ '%.2f'|format(order.amount) }}</strong></td></tr>
+                </tfoot>
+            </table>
+        </div>
+        <p class="receipt-thanks">Thank you for choosing Vior Hotel.</p>
+        <button class="btn btn-primary" type="button" onclick="window.print()">Print / save receipt</button>
+    </main>
+</body>
+</html>

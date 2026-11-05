@@ -24,6 +24,14 @@ environments that need the values, save, and redeploy.
 | `PESAPAL_CALLBACK_URL` | For online payments | Public HTTPS customer-return URL, normally `https://<domain>/payment/return`. |
 | `PESAPAL_NOTIFICATION_ID` | For online payments | IPN ID returned when registering `https://<domain>/api/pesapal/ipn` with Pesapal. |
 | `MPESA_TILL_NUMBER` | Optional | Till number displayed for manual Till orders; defaults to the current configured business Till. |
+| `WHATSAPP_ACCESS_TOKEN` | For WhatsApp receipts | Meta WhatsApp Cloud API access token. Keep it server-side. |
+| `WHATSAPP_PHONE_NUMBER_ID` | For WhatsApp receipts | Meta phone-number ID for the WhatsApp Business sender. |
+| `WHATSAPP_RECEIPT_TEMPLATE` | For WhatsApp receipts | Name of the approved receipt template, with five body parameters configured as described below. |
+| `WHATSAPP_TEMPLATE_LANGUAGE` | For WhatsApp receipts | Language code configured on the approved Meta template (defaults to `en`). |
+| `WHATSAPP_STATUS_TEMPLATE` | Optional | Approved order-status template that accepts three body parameters. |
+| `WHATSAPP_GRAPH_VERSION` | Optional | Meta Graph API version used by the sender. |
+| `PUBLIC_BASE_URL` | For WhatsApp receipt links | Public HTTPS origin used to construct signed receipt links, without a trailing slash. |
+| `CRON_SECRET` | For outbox retries | Long random bearer secret required by the protected notification retry endpoint. |
 
 Do not commit these values, add them to frontend code, or paste them into source
 files. `.env` is ignored for local development; use the hosting dashboard for
@@ -87,10 +95,52 @@ Pesapal's official [API 3.0 reference](https://developer.pesapal.com/how-to-inte
 documents the sandbox and live base URLs. Never expose the consumer secret or
 access token to browser code.
 
-## Still not implemented
+## Receipts and WhatsApp notifications
 
-WhatsApp Cloud API messaging, approved templates, notification retries, and
-receipts are not wired yet. Loyalty, full customer/staff roles, accounting,
-inventory/suppliers, and a complete finance/analytics dashboard also remain
-future work. Do not configure production WhatsApp credentials until that
-server-side integration is implemented.
+After Pesapal verifies a payment, or an authorized staff member verifies a Till
+payment, the application records the payment and creates a receipt notification
+only when the customer explicitly opted in to WhatsApp at checkout. The message
+contains the order number, item summary, total, payment reference, and a
+time-limited signed receipt link. The receipt is an HTML page customers can
+print or save as PDF from their browser; the application does not currently
+generate an attached PDF.
+
+To enable delivery:
+
+1. Configure the WhatsApp Business Cloud API sender and set
+   `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, and `PUBLIC_BASE_URL`
+   in the hosting environment.
+2. Create and obtain Meta approval for a utility message template with five
+   body placeholders, in this order: order number, item summary, total,
+   payment reference, secure receipt URL. Set its exact name in
+   `WHATSAPP_RECEIPT_TEMPLATE` and approved language in
+   `WHATSAPP_TEMPLATE_LANGUAGE`.
+3. If order-status WhatsApp messages are desired, configure a separate
+   approved template accepting three body placeholders and set
+   `WHATSAPP_STATUS_TEMPLATE`.
+4. Configure a random `CRON_SECRET`. Schedule an external HTTPS scheduler to
+   call `POST /api/cron/notifications` with
+   `Authorization: Bearer <CRON_SECRET>` regularly. This endpoint retries
+   pending notifications with backoff; the initial send is attempted when the
+   payment is verified. Vercel Cron is not configured in this repository.
+5. Test using a Meta test recipient and a test order. Confirm payment
+   verification, explicit opt-in, template delivery, receipt link expiry, and a
+   retry after a temporary provider error before enabling live traffic.
+
+Missing credentials or an unapproved/misconfigured template prevents successful
+delivery; configuring the application does not provision a Meta Business
+account, approve templates, or guarantee message delivery. Check the
+notification outbox in the staff dashboard for delivery state and errors.
+
+## Scope and operational notes
+
+The application includes customer accounts and order history, basic staff
+roles, inventory/recipe tracking, delivery assignments, and finance records in
+addition to opt-in WhatsApp receipts. Verify these features in the deployed
+environment and configure the required credentials and business data first.
+
+This is not yet a full hotel ERP: loyalty point redemption and configurable
+rewards, delivery-zone pricing, comprehensive bilingual coverage, advanced
+accounting/analytics, and staff shifts/attendance are not implemented. Inventory
+deduction requires staff to configure recipes for menu items; it does not infer
+ingredients automatically.

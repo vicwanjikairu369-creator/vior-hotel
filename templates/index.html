@@ -1,10 +1,12 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ language }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Vior Hotel | Premium Dining</title>
     <meta name="description" content="Vior Hotel offers premium Kenyan dining, chef-crafted meals, and fast delivery service in a refined restaurant experience.">
+    <meta name="theme-color" content="#b20d24">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800;900&family=Poppins:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -26,9 +28,15 @@
                 <a href="#experience">Experience</a>
                 <a href="#reviews">Reviews</a>
                 <a href="#contact">Contact</a>
+                <label class="sr-only" for="siteLanguage">Language</label>
+                <select id="siteLanguage" class="language-switch">
+                    <option value="en" {{ 'selected' if language == 'en' else '' }}>EN</option>
+                    <option value="sw" {{ 'selected' if language == 'sw' else '' }}>SW</option>
+                </select>
                 <span class="nav-welcome">Welcome, {{ session.get('customer_name') or 'Guest' }}</span>
                 <a href="/cart" class="nav-cart">Cart</a>
                 {% if session.get('customer_name') %}
+                <a href="{{ url_for('customer_account') }}">My account</a>
                 <a href="/logout">Sign out</a>
                 {% else %}
                 <a href="{{ url_for('customer_login') }}">Sign in</a>
@@ -125,6 +133,12 @@
                 <div class="section-heading">
                     <p class="eyebrow eyebrow-red">Chef's collection</p>
                     <h2>Comfort food, elevated.</h2>
+                </div>
+                <div class="menu-tools">
+                    <label class="sr-only" for="menuSearch">Search menu</label>
+                    <input id="menuSearch" type="search" placeholder="Search meals..." autocomplete="off">
+                    <label class="favorite-filter"><input id="favoritesOnly" type="checkbox"> Show saved meals</label>
+                    <p id="menuSearchStatus" aria-live="polite"></p>
                 </div>
 
                 <div class="menu-category">

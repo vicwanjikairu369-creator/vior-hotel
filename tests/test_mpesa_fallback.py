@@ -1,4 +1,5 @@
 import re
+import sqlite3
 from unittest.mock import Mock, patch
 
 import pytest
@@ -138,6 +139,53 @@ def test_staff_login_opens_admin_dashboard(client, monkeypatch):
     assert client.get('/admin').status_code == 200
 
 
+def test_staff_login_is_rate_limited_by_request_ip(client, monkeypatch):
+    monkeypatch.setenv('ADMIN_PHONE', '254700000000')
+    monkeypatch.setenv('ADMIN_PASSWORD', 'test-password')
+    client.get('/login')
+    with client.session_transaction() as sess:
+        csrf_token = sess['csrf_token']
+
+    for _ in range(10):
+        response = client.post(
+            '/login',
+            data={
+                'phone': '0700000000',
+                'admin_password': 'incorrect',
+                'csrf_token': csrf_token,
+            },
+        )
+        assert response.status_code == 401
+
+    blocked = client.post(
+        '/login',
+        data={
+            'phone': '0700000000',
+            'admin_password': 'incorrect',
+            'csrf_token': csrf_token,
+        },
+    )
+    assert blocked.status_code == 429
+    assert database.query_db(
+        'SELECT COUNT(*) AS total FROM auth_attempts',
+        one=True,
+    )['total'] == 10
+
+
+def test_existing_database_migration_adds_order_created_at(tmp_path):
+    connection = sqlite3.connect(tmp_path / 'legacy.db')
+    connection.execute('CREATE TABLE users (id INTEGER PRIMARY KEY, phone TEXT)')
+    connection.execute('CREATE TABLE orders (id INTEGER PRIMARY KEY, order_number TEXT)')
+
+    database._create_or_migrate_schema(connection)
+
+    order_columns = {
+        row[1] for row in connection.execute('PRAGMA table_info(orders)').fetchall()
+    }
+    assert 'created_at' in order_columns
+    connection.close()
+
+
 def test_admin_order_status_requires_csrf_token(client, monkeypatch):
     _staff_login(client, monkeypatch)
     order = client.post(
@@ -254,6 +302,169 @@ def test_admin_media_upload_needs_login_and_csrf(client):
         json={'section': 'stories', 'media_type': 'image'},
     )
     assert unauthorized.status_code == 401
+
+
+def test_whatsapp_receipt_is_sent_only_after_verified_payment(client, monkeypatch):
+    monkeypatch.setenv('ADMIN_PHONE', '254700000000')
+    monkeypatch.setenv('ADMIN_PASSWORD', 'test-password')
+    monkeypatch.setenv('WHATSAPP_ACCESS_TOKEN', 'test-access-token')
+    monkeypatch.setenv('WHATSAPP_PHONE_NUMBER_ID', '123456789')
+    monkeypatch.setenv('WHATSAPP_RECEIPT_TEMPLATE', 'vior_order_receipt')
+    monkeypatch.setenv('PUBLIC_BASE_URL', 'https://vior.example')
+    whatsapp_response = Mock()
+    whatsapp_response.json.return_value = {'messages': [{'id': 'wamid.test-message'}]}
+    with patch('app.requests.post', return_value=whatsapp_response) as send_whatsapp:
+        order_response = client.post(
+            '/api/mpesa/till-order',
+            json={
+                'items': [{'name': 'Tea'}],
+                'phone': '0712345678',
+                'order_type': 'Pickup',
+                'whatsapp_opt_in': True,
+            },
+            headers={'Idempotency-Key': 'checkout-whatsapp-receipt-01'},
+        )
+        assert order_response.status_code == 201
+        order = order_response.get_json()
+        assert database.query_db(
+            'SELECT COUNT(*) AS total FROM notification_outbox',
+            one=True,
+        )['total'] == 0
+
+        assert _staff_login(client, monkeypatch).status_code == 302
+        order_row = database.query_db(
+            'SELECT id FROM orders WHERE order_number = %s',
+            (order['order_number'],),
+            one=True,
+        )
+        with client.session_transaction() as sess:
+            csrf_token = sess['csrf_token']
+        verified = client.post(
+            f"/admin/order/{order_row['id']}/status",
+            data={'status': 'Payment Verified', 'csrf_token': csrf_token},
+        )
+        assert verified.status_code == 302
+
+    notification = database.query_db(
+        'SELECT * FROM notification_outbox WHERE idempotency_key = %s',
+        (f"whatsapp:receipt:{order['order_number']}:",),
+        one=True,
+    )
+    assert notification['status'] == 'Sent'
+    assert notification['provider_message_id'] == 'wamid.test-message'
+    send_whatsapp.assert_called_once()
+    assert send_whatsapp.call_args.kwargs['headers']['Authorization'] == 'Bearer test-access-token'
+    template = send_whatsapp.call_args.kwargs['json']['template']
+    assert template['name'] == 'vior_order_receipt'
+    assert template['components'][0]['parameters'][0]['text'] == order['order_number']
+    receipt_url = template['components'][0]['parameters'][-1]['text']
+    receipt_response = client.get(receipt_url.replace('https://vior.example', ''))
+    assert receipt_response.status_code == 200
+    assert b'Payment receipt' in receipt_response.data
+    assert order['order_number'].encode() in receipt_response.data
+    assert database.query_db(
+        'SELECT COUNT(*) AS total FROM financial_transactions WHERE idempotency_key = %s',
+        (f"payment:{order['order_number']}",),
+        one=True,
+    )['total'] == 1
+
+
+def test_paid_orders_deduct_configured_recipe_stock_once(client, monkeypatch):
+    now = '2026-11-05T07:00:00+00:00'
+    database.query_db(
+        'INSERT INTO inventory_items (name, unit, quantity, reorder_level, unit_cost, updated_at) '
+        'VALUES (%s, %s, %s, %s, %s, %s)',
+        ('Milk', 'litre', 1.0, 0.2, 100.0, now),
+    )
+    item = database.query_db('SELECT id FROM inventory_items WHERE name = %s', ('Milk',), one=True)
+    database.query_db(
+        'INSERT INTO inventory_recipes (menu_item_name, inventory_item_id, quantity_per_serving) '
+        'VALUES (%s, %s, %s)',
+        ('Tea', item['id'], 0.1),
+    )
+    order = client.post(
+        '/api/mpesa/till-order',
+        json={'items': [{'name': 'Tea'}], 'phone': '0712345678', 'order_type': 'Pickup'},
+        headers={'Idempotency-Key': 'checkout-inventory-deduct-1'},
+    ).get_json()
+
+    assert _staff_login(client, monkeypatch).status_code == 302
+    order_row = database.query_db(
+        'SELECT id FROM orders WHERE order_number = %s',
+        (order['order_number'],),
+        one=True,
+    )
+    with client.session_transaction() as sess:
+        csrf_token = sess['csrf_token']
+    verified = client.post(
+        f"/admin/order/{order_row['id']}/status",
+        data={'status': 'Payment Verified', 'csrf_token': csrf_token},
+    )
+    assert verified.status_code == 302
+    preparing = client.post(
+        f"/admin/order/{order_row['id']}/status",
+        data={'status': 'Preparing', 'csrf_token': csrf_token},
+    )
+    assert preparing.status_code == 302
+    stock = database.query_db(
+        'SELECT quantity FROM inventory_items WHERE id = %s',
+        (item['id'],),
+        one=True,
+    )
+    assert stock['quantity'] == pytest.approx(0.9)
+    movement_count = database.query_db(
+        'SELECT COUNT(*) AS total FROM inventory_movements WHERE reference = %s',
+        (order['order_number'],),
+        one=True,
+    )['total']
+    assert movement_count == 1
+
+
+def test_verified_customer_order_earns_loyalty_points_idempotently(client, monkeypatch):
+    database.query_db(
+        'INSERT INTO users (fullname, phone, phone_verified_at) VALUES (%s, %s, %s)',
+        ('Loyal Customer', '254712300000', '2026-11-05T07:00:00+00:00'),
+    )
+    customer = database.query_db(
+        'SELECT id FROM users WHERE phone = %s',
+        ('254712300000',),
+        one=True,
+    )
+    with client.session_transaction() as sess:
+        sess['customer_id'] = customer['id']
+        sess['customer_name'] = 'Loyal Customer'
+        sess['customer_phone'] = '254712300000'
+    order = client.post(
+        '/api/mpesa/till-order',
+        json={'items': [{'name': 'Ugali Beef Stew'}], 'phone': '0712300000', 'order_type': 'Pickup'},
+        headers={'Idempotency-Key': 'checkout-loyalty-earned-001'},
+    ).get_json()
+
+    assert _staff_login(client, monkeypatch).status_code == 302
+    order_row = database.query_db(
+        'SELECT id FROM orders WHERE order_number = %s',
+        (order['order_number'],),
+        one=True,
+    )
+    with client.session_transaction() as sess:
+        csrf_token = sess['csrf_token']
+    response = client.post(
+        f"/admin/order/{order_row['id']}/status",
+        data={'status': 'Payment Verified', 'csrf_token': csrf_token},
+    )
+    assert response.status_code == 302
+    balance = database.query_db(
+        'SELECT points_balance FROM loyalty_accounts WHERE customer_id = %s',
+        (customer['id'],),
+        one=True,
+    )
+    assert balance['points_balance'] == 2
+    assert database.add_loyalty_points(customer['id'], order['order_number'], 2, '2026-11-05T07:01:00+00:00') is False
+    assert database.query_db(
+        'SELECT points_balance FROM loyalty_accounts WHERE customer_id = %s',
+        (customer['id'],),
+        one=True,
+    )['points_balance'] == 2
 
 
 def test_new_order_number_has_unpredictable_suffix(client):

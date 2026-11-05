@@ -1,8 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ language }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#b20d24">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
     <title>Your Cart - Vior Hotel</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,6 +22,11 @@
             <nav class="main-nav" aria-label="Cart navigation">
                 <a href="/">Back to menu</a>
                 <a href="#checkout">Checkout</a>
+                <label class="sr-only" for="siteLanguage">Language</label>
+                <select id="siteLanguage" class="language-switch">
+                    <option value="en" {{ 'selected' if language == 'en' else '' }}>EN</option>
+                    <option value="sw" {{ 'selected' if language == 'sw' else '' }}>SW</option>
+                </select>
             </nav>
         </div>
     </header>
@@ -45,6 +52,37 @@
                 <p><a href="{{ url_for('register') }}">Register</a> or <a href="{{ url_for('customer_login') }}">sign in</a> to use your customer account. Guest checkout remains available.</p>
                 {% endif %}
             </div>
+
+            {% if saved_addresses %}
+            <div class="form-group">
+                <label for="savedAddress">Use a saved address</label>
+                <select id="savedAddress">
+                    <option value="">Enter a new address</option>
+                    {% for address in saved_addresses %}
+                    <option value="{{ address.id }}"
+                        data-street="{{ address.address }}"
+                        data-locality="{{ address.locality }}"
+                        data-region="{{ address.region or '' }}"
+                        data-postal="{{ address.postal_code }}"
+                        data-country="{{ address.country }}">{{ address.label }} · {{ address.address }}, {{ address.locality }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+
+            <div class="form-group">
+                <label for="specialInstructions">Meal / order instructions (optional)</label>
+                <textarea id="specialInstructions" maxlength="500" rows="3" placeholder="Allergies, spice preference, or delivery notes"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="scheduledOrderTime">Schedule for later (optional)</label>
+                <input id="scheduledOrderTime" type="datetime-local">
+                <small class="optional-note">Schedule at least 30 minutes ahead and within the next 30 days.</small>
+            </div>
+            <label class="whatsapp-consent">
+                <input id="whatsappOptIn" type="checkbox">
+                Send my payment receipt and order updates to this phone number on WhatsApp. I agree to receive these service messages.
+            </label>
 
             <div class="form-group">
                 <label>Delivery Method</label>
@@ -242,6 +280,23 @@
                 ? 'Verify the destination address and postal code before placing a delivery order.'
                 : '';
             if (!onlineDelivery) resetAddressVerification();
+            else if (document.getElementById('savedAddress')?.value) {
+                document.getElementById('verifyAddressBtn').click();
+            }
+        });
+
+        document.getElementById('savedAddress')?.addEventListener('change', event => {
+            const option = event.target.selectedOptions[0];
+            if (!option.value) return;
+            document.getElementById('deliveryStreet').value = option.dataset.street || '';
+            document.getElementById('deliveryLocality').value = option.dataset.locality || '';
+            document.getElementById('deliveryRegion').value = option.dataset.region || '';
+            document.getElementById('deliveryPostalCode').value = option.dataset.postal || '';
+            document.getElementById('deliveryCountry').value = option.dataset.country || '';
+            resetAddressVerification();
+            if (document.getElementById('deliveryMethod').value === 'Online') {
+                document.getElementById('verifyAddressBtn').click();
+            }
         });
 
         ['deliveryStreet', 'deliveryLocality', 'deliveryRegion', 'deliveryPostalCode', 'deliveryCountry'].forEach(id => {
@@ -293,7 +348,7 @@
             button.disabled = true;
             button.textContent = 'Connecting to Pesapal…';
             try {
-                const payload = {items: checkoutCart, phone, order_type: method, ...addressPayload, address_verification_token: verifiedAddress?.verification_token};
+                const payload = getOrderPayload(phone, method, addressPayload);
                 const response = await fetch('/api/pesapal/pay', {
                     method: 'POST',
                     headers: {
@@ -335,7 +390,7 @@
             button.disabled = true;
             button.textContent = 'Preparing till instructions…';
             try {
-                const payload = {items: checkoutCart, phone, order_type: method, ...addressPayload, address_verification_token: verifiedAddress?.verification_token};
+                const payload = getOrderPayload(phone, method, addressPayload);
                 const response = await fetch('/api/mpesa/till-order', {
                     method: 'POST',
                     headers: {
@@ -368,6 +423,21 @@
                 button.disabled = false;
                 button.textContent = 'Pay to Till 3484738';
             }
+
+        }
+
+        function getOrderPayload(phone, method, addressPayload) {
+            const scheduledLocal = document.getElementById('scheduledOrderTime').value;
+            return {
+                items: checkoutCart,
+                phone,
+                order_type: method,
+                ...addressPayload,
+                address_verification_token: verifiedAddress?.verification_token,
+                special_instructions: document.getElementById('specialInstructions').value.trim(),
+                scheduled_at: scheduledLocal ? new Date(scheduledLocal).toISOString() : null,
+                whatsapp_opt_in: document.getElementById('whatsappOptIn').checked,
+            };
         }
 
         function showOrderConfirmation(orderNumber, message) {

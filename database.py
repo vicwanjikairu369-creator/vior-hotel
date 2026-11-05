@@ -17,6 +17,7 @@ _SQLITE_SCHEMA = (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         fullname TEXT NOT NULL,
         phone TEXT NOT NULL UNIQUE,
+        phone_verified_at TEXT,
         dob TEXT,
         gender TEXT,
         customer_type TEXT
@@ -26,6 +27,7 @@ _SQLITE_SCHEMA = (
     CREATE TABLE IF NOT EXISTS orders (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         order_number TEXT NOT NULL UNIQUE,
+        idempotency_key TEXT,
         customer_name TEXT,
         customer_phone TEXT,
         items TEXT,
@@ -53,6 +55,40 @@ _SQLITE_SCHEMA = (
         review TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS otp_challenges (
+        id TEXT PRIMARY KEY,
+        phone TEXT NOT NULL,
+        fullname TEXT,
+        purpose TEXT NOT NULL,
+        code_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        consumed_at TEXT,
+        request_ip TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_number TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        merchant_reference TEXT NOT NULL UNIQUE,
+        order_tracking_id TEXT UNIQUE,
+        redirect_url TEXT,
+        amount REAL NOT NULL,
+        currency TEXT NOT NULL,
+        status TEXT NOT NULL,
+        provider_status TEXT,
+        receipt TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_otp_phone_created_at ON otp_challenges (phone, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_otp_ip_created_at ON otp_challenges (request_ip, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_payments_order_number ON payments (order_number)",
 )
 
 _POSTGRES_SCHEMA = (
@@ -61,6 +97,7 @@ _POSTGRES_SCHEMA = (
         id SERIAL PRIMARY KEY,
         fullname TEXT NOT NULL,
         phone TEXT NOT NULL UNIQUE,
+        phone_verified_at TEXT,
         dob TEXT,
         gender TEXT,
         customer_type TEXT
@@ -70,6 +107,7 @@ _POSTGRES_SCHEMA = (
     CREATE TABLE IF NOT EXISTS orders (
         id SERIAL PRIMARY KEY,
         order_number TEXT NOT NULL UNIQUE,
+        idempotency_key TEXT,
         customer_name TEXT,
         customer_phone TEXT,
         items TEXT,
@@ -97,18 +135,54 @@ _POSTGRES_SCHEMA = (
         review TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS otp_challenges (
+        id TEXT PRIMARY KEY,
+        phone TEXT NOT NULL,
+        fullname TEXT,
+        purpose TEXT NOT NULL,
+        code_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        consumed_at TEXT,
+        request_ip TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS payments (
+        id SERIAL PRIMARY KEY,
+        order_number TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        merchant_reference TEXT NOT NULL UNIQUE,
+        order_tracking_id TEXT UNIQUE,
+        redirect_url TEXT,
+        amount DOUBLE PRECISION NOT NULL,
+        currency TEXT NOT NULL,
+        status TEXT NOT NULL,
+        provider_status TEXT,
+        receipt TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_otp_phone_created_at ON otp_challenges (phone, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_otp_ip_created_at ON otp_challenges (request_ip, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_payments_order_number ON payments (order_number)",
 )
 
 _MIGRATIONS = {
     "users": {
         "fullname": "TEXT",
         "phone": "TEXT",
+        "phone_verified_at": "TEXT",
         "dob": "TEXT",
         "gender": "TEXT",
         "customer_type": "TEXT",
     },
     "orders": {
         "order_number": "TEXT",
+        "idempotency_key": "TEXT",
         "customer_name": "TEXT",
         "customer_phone": "TEXT",
         "items": "TEXT",
@@ -163,6 +237,10 @@ def _create_or_migrate_schema(connection):
                     sqlite_type = column_type.replace("BOOLEAN NOT NULL DEFAULT FALSE", "INTEGER NOT NULL DEFAULT 0")
                     sqlite_type = sqlite_type.replace("DOUBLE PRECISION", "REAL")
                     cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {sqlite_type}")
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_idempotency_key "
+            "ON orders (idempotency_key) WHERE idempotency_key IS NOT NULL"
+        )
         connection.commit()
     except Exception:
         connection.rollback()
@@ -208,6 +286,26 @@ def query_db(statement, params=(), one=False):
             return dict(rows[0]) if one and rows else (None if one else [dict(row) for row in rows])
         connection.commit()
         return cursor.rowcount
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def execute_transaction(statements):
+    connection = get_db_connection()
+    cursor = connection.cursor()
+    try:
+        rowcounts = []
+        for statement, params in statements:
+            if _connection_is_sqlite(connection):
+                statement = statement.replace("%s", "?")
+            cursor.execute(statement, params)
+            rowcounts.append(cursor.rowcount)
+        connection.commit()
+        return rowcounts
     except Exception:
         connection.rollback()
         raise

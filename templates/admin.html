@@ -63,16 +63,19 @@
                             <td>
                                 {% if order.status == 'Awaiting Till Payment — verify manually' %}
                                 <form method="POST" action="{{ url_for('update_order_status', order_id=order.id) }}">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                     <input type="hidden" name="status" value="Payment Verified">
                                     <button type="submit" class="btn btn-primary admin-action">Verify Till Payment</button>
                                 </form>
                                 {% elif order.status in ['Paid', 'Payment Verified', 'Pending'] %}
                                 <form method="POST" action="{{ url_for('update_order_status', order_id=order.id) }}">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                     <input type="hidden" name="status" value="Preparing">
                                     <button type="submit" class="btn btn-primary admin-action">Start Preparing</button>
                                 </form>
                                 {% elif order.status in ['Preparing', 'Out for Delivery'] %}
                                 <form method="POST" action="{{ url_for('update_order_status', order_id=order.id) }}" class="status-update-form">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                     <select name="status" aria-label="Update status for {{ order.order_number }}">
                                         {% if order.status == 'Preparing' %}
                                         <option value="Out for Delivery">Out for Delivery</option>

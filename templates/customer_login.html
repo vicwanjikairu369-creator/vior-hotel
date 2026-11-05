@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#172923">
+    <title>Customer Sign In - Vior Hotel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="register-page">
+    <main class="register-shell">
+        <section class="register-story" aria-label="Welcome back to Vior Hotel">
+            <a class="register-brand" href="/">VIOR <span>HOTEL</span></a>
+            <div class="register-story-copy">
+                <p class="register-kicker">Your Vior account</p>
+                <h1>Welcome<br><em>back.</em></h1>
+                <p>Sign in securely with a one-time code sent to your verified phone.</p>
+            </div>
+            <div class="register-story-foot"><span>01</span> &nbsp; Time for Food</div>
+        </section>
+
+        <section class="register-panel">
+            <div class="register-panel-top"><span>VIOR HOTEL</span><span>NAIROBI · KENYA</span></div>
+            <div class="register-form-wrap">
+                <p class="register-kicker">Customer sign in</p>
+                <h2>Your orders,<br>all in one place.</h2>
+                <p class="register-intro">No password needed. We’ll send a short-lived verification code to your phone.</p>
+
+                {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+                {% if otp_pending %}
+                <p class="payment-notice" role="status">We sent a one-time code to +{{ phone }}. It expires in five minutes.</p>
+                <form action="{{ url_for('customer_login') }}" method="POST" class="register-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="action" value="verify">
+                    <div class="form-group">
+                        <label for="code">Verification code</label>
+                        <input id="code" type="text" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus>
+                    </div>
+                    <button type="submit" class="register-submit">Verify and sign in <span aria-hidden="true">↗</span></button>
+                </form>
+                <form action="{{ url_for('customer_login') }}" method="POST" class="register-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="action" value="resend">
+                    <button type="submit" class="btn btn-secondary">Send a new code</button>
+                </form>
+                {% else %}
+                <form action="{{ url_for('customer_login') }}" method="POST" class="register-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="action" value="request">
+                    <div class="form-group">
+                        <label for="phone">Mobile number</label>
+                        <input id="phone" type="tel" name="phone" value="{{ phone|default('') }}" placeholder="0712 345 678" autocomplete="tel" inputmode="tel" maxlength="18" pattern="[+0-9() -]{9,18}" required autofocus>
+                    </div>
+                    <button type="submit" class="register-submit">Send sign-in code <span aria-hidden="true">↗</span></button>
+                </form>
+                {% endif %}
+                <p class="register-admin">New to Vior? <a href="{{ url_for('register') }}">Create an account</a></p>
+                <p class="register-admin">Hotel staff? <a href="{{ url_for('login') }}">Staff sign in</a></p>
+            </div>
+            <div class="register-panel-foot">A warm welcome, every time.</div>
+        </section>
+    </main>
+</body>
+</html>

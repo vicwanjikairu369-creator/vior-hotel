@@ -42,7 +42,7 @@
                 {% if session.get('customer_name') %}
                 <p>Customer: <strong>{{ session.get('customer_name') }}</strong> · {{ session.get('customer_phone') }}</p>
                 {% else %}
-                <p><a href="{{ url_for('login') }}">Register or log in</a> to keep a separate cart for your account.</p>
+                <p><a href="{{ url_for('register') }}">Register</a> or <a href="{{ url_for('customer_login') }}">sign in</a> to use your customer account. Guest checkout remains available.</p>
                 {% endif %}
             </div>
 
@@ -80,7 +80,7 @@
             </div>
 
             <div class="payment-options">
-                <button id="checkoutBtn" class="btn btn-primary" onclick="processCheckout()">Pay with M-Pesa</button>
+                <button id="checkoutBtn" class="btn btn-primary" onclick="processCheckout()">Continue to secure payment</button>
                 <button id="tillBtn" class="btn btn-secondary" onclick="payByTill()">Pay to Till 3484738</button>
             </div>
             <div id="tillInstructions" class="payment-notice" role="status" aria-live="polite" hidden></div>
@@ -215,6 +215,26 @@
             document.getElementById('addressVerificationStatus').textContent = '';
         }
 
+        function getCheckoutIdempotencyKey(payload) {
+            const storageKey = `viorCheckout:${CART_STORAGE_KEY}`;
+            const request = JSON.stringify(payload);
+            let saved = null;
+            try {
+                saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
+            } catch (error) {
+                saved = null;
+            }
+            if (saved && saved.request === request && typeof saved.key === 'string') {
+                return saved.key;
+            }
+            if (!window.crypto || !window.crypto.randomUUID) {
+                throw new Error('Secure checkout is unavailable in this browser. Please use an up-to-date browser.');
+            }
+            const key = window.crypto.randomUUID();
+            localStorage.setItem(storageKey, JSON.stringify({request, key}));
+            return key;
+        }
+
         document.getElementById('deliveryMethod').addEventListener('change', event => {
             const onlineDelivery = event.target.value === 'Online';
             document.getElementById('deliveryAddressGroup').hidden = !onlineDelivery;
@@ -271,31 +291,33 @@
             if (method === 'Online' && (!verifiedAddress || verifiedAddress.address !== addressPayload.delivery_address || verifiedAddress.postal_code !== addressPayload.delivery_postal_code || !document.getElementById('confirmVerifiedAddress').checked)) { alert('Verify the address and confirm the matched destination before checkout.'); return; }
 
             button.disabled = true;
-            button.textContent = 'Connecting to M-Pesa…';
+            button.textContent = 'Connecting to Pesapal…';
             try {
-                const response = await fetch('/api/mpesa/pay', {
+                const payload = {items: checkoutCart, phone, order_type: method, ...addressPayload, address_verification_token: verifiedAddress?.verification_token};
+                const response = await fetch('/api/pesapal/pay', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ items: checkoutCart, phone, order_type: method, ...addressPayload, address_verification_token: verifiedAddress?.verification_token })
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Idempotency-Key': getCheckoutIdempotencyKey(payload),
+                    },
+                    body: JSON.stringify(payload),
                 });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.error || data.errorMessage || 'Payment could not be started.');
-                if (data.ResponseCode === '0' || data.CheckoutRequestID) {
+                if (data.AlreadyPaid) {
                     clearCheckoutCart();
-                    showOrderConfirmation(
-                        data.OrderNumber,
-                        data.Fallback
-                            ? `M-Pesa prompt is unavailable. Pay at Till ${data.TillNumber || '3484738'} and keep your order number.`
-                            : 'M-Pesa prompt sent. Check your phone and enter your PIN to complete payment.',
-                    );
+                    showOrderConfirmation(data.OrderNumber, 'Pesapal has already verified payment for this order.');
+                } else if (data.redirect_url) {
+                    clearCheckoutCart();
+                    window.location.assign(data.redirect_url);
                 } else {
-                    throw new Error(data.errorMessage || data.CustomerMessage || 'M-Pesa could not start the payment.');
+                    throw new Error('Pesapal did not return a secure checkout link.');
                 }
             } catch (error) {
                 alert(error.message || 'Network error. Please try again.');
             } finally {
                 button.disabled = false;
-                button.textContent = 'Pay with M-Pesa';
+                button.textContent = 'Continue to secure payment';
             }
         }
 
@@ -313,10 +335,14 @@
             button.disabled = true;
             button.textContent = 'Preparing till instructions…';
             try {
+                const payload = {items: checkoutCart, phone, order_type: method, ...addressPayload, address_verification_token: verifiedAddress?.verification_token};
                 const response = await fetch('/api/mpesa/till-order', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({items: checkoutCart, phone, order_type: method, ...addressPayload, address_verification_token: verifiedAddress?.verification_token})
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Idempotency-Key': getCheckoutIdempotencyKey(payload),
+                    },
+                    body: JSON.stringify(payload),
                 });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.error || 'Could not prepare the Till order.');
@@ -377,10 +403,26 @@
         function clearCheckoutCart() {
             checkoutCart = [];
             localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(checkoutCart));
+            localStorage.removeItem(`viorCheckout:${CART_STORAGE_KEY}`);
             loadCart();
         }
 
-        document.addEventListener('DOMContentLoaded', loadCart);
+        document.addEventListener('DOMContentLoaded', () => {
+            loadCart();
+            const params = new URLSearchParams(window.location.search);
+            const returnedOrder = params.get('order_number');
+            if (returnedOrder) {
+                const orderInput = document.getElementById('trackOrderNumber');
+                orderInput.value = returnedOrder;
+                showOrderConfirmation(
+                    returnedOrder,
+                    params.get('payment_check') === 'completed'
+                        ? 'Pesapal payment has been verified. Order updates will continue below.'
+                        : 'Payment verification is still pending. Check the latest order status below.',
+                );
+                trackOrderStatus(returnedOrder, true);
+            }
+        });
     </script>
 </body>
 </html>

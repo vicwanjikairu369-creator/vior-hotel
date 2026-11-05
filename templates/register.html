@@ -24,11 +24,29 @@
             <div class="register-form-wrap">
                 <p class="register-kicker">Welcome to Vior</p>
                 <h2>Make yourself<br>at home.</h2>
-                <p class="register-intro">A couple of details and you're in. We’ll use them to make your orders feel effortless.</p>
+                <p class="register-intro">Create your account with a verified Kenyan mobile number.</p>
 
                 {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+                {% if otp_pending %}
+                <p class="payment-notice" role="status">We sent a one-time code to +{{ phone }}. It expires in five minutes.</p>
                 <form action="{{ url_for('register') }}" method="POST" class="register-form">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="action" value="verify">
+                    <div class="form-group">
+                        <label for="code">Verification code</label>
+                        <input id="code" type="text" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus>
+                    </div>
+                    <button type="submit" class="register-submit">Verify phone <span aria-hidden="true">↗</span></button>
+                </form>
+                <form action="{{ url_for('register') }}" method="POST" class="register-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="action" value="resend">
+                    <button type="submit" class="btn btn-secondary">Send a new code</button>
+                </form>
+                {% else %}
+                <form action="{{ url_for('register') }}" method="POST" class="register-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="action" value="request">
                     <div class="form-group">
                         <label for="fullname">Your name</label>
                         <input id="fullname" type="text" name="fullname" value="{{ fullname|default('') }}" placeholder="How should we address you?" autocomplete="name" minlength="2" maxlength="80" required autofocus>
@@ -38,9 +56,11 @@
                         <input id="phone" type="tel" name="phone" value="{{ phone|default('') }}" placeholder="0712 345 678" autocomplete="tel" inputmode="tel" maxlength="18" pattern="[+0-9() -]{9,18}" aria-describedby="phone-help" required>
                         <small id="phone-help">Kenyan number used for your M-Pesa checkout and order details.</small>
                     </div>
-                    <button type="submit" class="register-submit">Continue to Vior <span aria-hidden="true">↗</span></button>
+                    <button type="submit" class="register-submit">Send verification code <span aria-hidden="true">↗</span></button>
                 </form>
-                <p class="register-privacy"><span aria-hidden="true">✦</span> Just your name and phone — no password, date of birth, or extra details. Phone ownership is not SMS-verified yet.</p>
+                {% endif %}
+                <p class="register-privacy"><span aria-hidden="true">✦</span> We only create the account after the verification code is confirmed. Never share your M-Pesa PIN or password.</p>
+                <p class="register-admin">Already registered? <a href="{{ url_for('customer_login') }}">Sign in with phone</a></p>
                 <p class="register-admin">Hotel staff? <a href="{{ url_for('login') }}">Staff sign in</a></p>
             </div>
             <div class="register-panel-foot">A warm welcome, every time.</div>

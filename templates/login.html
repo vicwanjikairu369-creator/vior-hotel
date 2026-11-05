@@ -43,6 +43,7 @@
                     <button type="submit" class="register-submit">Access dashboard <span aria-hidden="true">↗</span></button>
                 </form>
                 <p class="register-admin"><a href="{{ url_for('register') }}">Customer registration</a></p>
+                {% if staff_setup_available %}<p class="register-admin">First time setting up staff? <a href="{{ url_for('setup_first_staff_account') }}">Create the owner account</a></p>{% endif %}
             </div>
             <div class="register-panel-foot">Service with precision.</div>
         </section>

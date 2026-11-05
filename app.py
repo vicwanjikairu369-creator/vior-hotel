@@ -6,11 +6,13 @@ import logging
 import os
 import re
 import secrets
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlparse
 
 import requests
+import psycopg2
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -307,6 +309,19 @@ ROLE_PERMISSIONS = {
 def _has_permission(permission):
     return _is_admin() and permission in ROLE_PERMISSIONS.get(
         session.get("staff_role", "owner"), set()
+    )
+
+
+def _staff_setup_available():
+    setup_token = os.getenv("STAFF_SETUP_TOKEN", "")
+    if len(setup_token) < 32 or os.getenv("ADMIN_PHONE") or os.getenv("ADMIN_PASSWORD"):
+        return False
+    if query_db("SELECT id FROM staff_setup WHERE id = %s", (1,), one=True):
+        return False
+    return not query_db(
+        "SELECT id FROM staff_accounts WHERE role = %s",
+        ("owner",),
+        one=True,
     )
 
 
@@ -1126,6 +1141,7 @@ def login():
                 "login.html",
                 error="Please refresh the page and try again.",
                 csrf_token=session.setdefault("csrf_token", secrets.token_urlsafe(32)),
+                staff_setup_available=_staff_setup_available(),
             ), 400
         request_ip = request.remote_addr or "unknown"
         now = datetime.now(timezone.utc)
@@ -1141,6 +1157,7 @@ def login():
                 "login.html",
                 error="Too many sign-in attempts. Please wait 15 minutes before trying again.",
                 csrf_token=session.get("csrf_token"),
+                staff_setup_available=_staff_setup_available(),
             ), 429
         configured_phone = _normalize_phone(os.getenv("ADMIN_PHONE"))
         submitted_phone = _normalize_phone(request.form.get("phone"))
@@ -1179,8 +1196,105 @@ def login():
             "login.html",
             error="Staff sign in is unavailable or the credentials are incorrect.",
             csrf_token=csrf_token,
+            staff_setup_available=_staff_setup_available(),
         ), 401
-    return render_template("login.html", csrf_token=session.setdefault("csrf_token", secrets.token_urlsafe(32)))
+    return render_template(
+        "login.html",
+        csrf_token=session.setdefault("csrf_token", secrets.token_urlsafe(32)),
+        staff_setup_available=_staff_setup_available(),
+    )
+
+
+@app.route("/staff/setup", methods=["GET", "POST"])
+def setup_first_staff_account():
+    if not _staff_setup_available():
+        return "First-time staff setup is unavailable.", 404
+
+    error = None
+    status = 200
+    if request.method == "POST":
+        csrf_token = session.get("csrf_token")
+        if not csrf_token or not _valid_csrf_token():
+            error, status = "Please refresh the page and try again.", 400
+        else:
+            request_ip = request.remote_addr or "unknown"
+            now = datetime.now(timezone.utc)
+            attempt_cutoff = (now - timedelta(minutes=15)).isoformat()
+            attempts = query_db(
+                "SELECT COUNT(*) AS total FROM auth_attempts "
+                "WHERE request_ip = %s AND attempted_at >= %s",
+                (request_ip, attempt_cutoff),
+                one=True,
+            )
+            if attempts["total"] >= 10:
+                error, status = "Too many setup attempts. Please wait 15 minutes.", 429
+            else:
+                provided_token = str(request.form.get("setup_token") or "")
+                configured_token = os.getenv("STAFF_SETUP_TOKEN", "")
+                if not hmac.compare_digest(provided_token, configured_token):
+                    query_db(
+                        "INSERT INTO auth_attempts (request_ip, attempted_at) VALUES (%s, %s)",
+                        (request_ip, now.isoformat()),
+                    )
+                    error, status = "The setup token is incorrect.", 401
+                else:
+                    fullname = str(request.form.get("fullname") or "").strip()
+                    phone = _normalize_phone(request.form.get("phone"))
+                    password = str(request.form.get("password") or "")
+                    password_confirmation = str(request.form.get("password_confirmation") or "")
+                    if len(fullname) < 2 or len(fullname) > 80 or not phone:
+                        error, status = "Enter your name and a valid Kenyan mobile number.", 400
+                    elif len(password) < 12 or len(password) > 256:
+                        error, status = "Choose a password with at least 12 characters.", 400
+                    elif password != password_confirmation:
+                        error, status = "The password confirmation does not match.", 400
+                    else:
+                        try:
+                            execute_transaction_checked(
+                                [
+                                    (
+                                        """
+                                        INSERT INTO staff_setup (id, owner_phone, claimed_at)
+                                        VALUES (%s, %s, %s)
+                                        ON CONFLICT (id) DO NOTHING
+                                        """,
+                                        (1, phone, now.isoformat()),
+                                    ),
+                                    (
+                                        """
+                                        INSERT INTO staff_accounts
+                                            (fullname, phone, password_hash, role, active, created_at)
+                                        VALUES (%s, %s, %s, %s, %s, %s)
+                                        """,
+                                        (
+                                            fullname, phone, generate_password_hash(password),
+                                            "owner", True, now.isoformat(),
+                                        ),
+                                    ),
+                                ],
+                                {0: 1, 1: 1},
+                            )
+                        except RuntimeError:
+                            return "First-time staff setup has already been completed.", 409
+                        except (sqlite3.IntegrityError, psycopg2.IntegrityError):
+                            return "An owner account already exists or this phone number is already registered.", 409
+                        except (sqlite3.DatabaseError, psycopg2.DatabaseError):
+                            app.logger.exception("Could not complete first-time staff setup.")
+                            return "The owner account could not be created. Please contact the site administrator.", 500
+                        query_db("DELETE FROM auth_attempts WHERE request_ip = %s", (request_ip,))
+                        session.clear()
+                        session["is_admin"] = True
+                        session["staff_role"] = "owner"
+                        session["staff_phone"] = phone
+                        session["staff_name"] = fullname
+                        _write_audit(phone, "staff_setup_completed", "staff", phone, {"role": "owner"})
+                        return redirect(url_for("admin_dashboard"))
+
+    return render_template(
+        "staff_setup.html",
+        csrf_token=session.setdefault("csrf_token", secrets.token_urlsafe(32)),
+        error=error,
+    ), status
 
 
 @app.route("/logout")

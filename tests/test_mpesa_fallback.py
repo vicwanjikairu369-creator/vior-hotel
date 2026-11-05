@@ -23,6 +23,8 @@ def client(tmp_path, monkeypatch):
         monkeypatch.delenv(key, raising=False)
     for key in ('AFRICASTALKING_USERNAME', 'AFRICASTALKING_API_KEY', 'AFRICASTALKING_SENDER_ID'):
         monkeypatch.delenv(key, raising=False)
+    for key in ('ADMIN_PHONE', 'ADMIN_PASSWORD', 'STAFF_SETUP_TOKEN'):
+        monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(database, '_initialized', False)
     app.config['TESTING'] = True
     app.debug = True
@@ -170,6 +172,67 @@ def test_staff_login_is_rate_limited_by_request_ip(client, monkeypatch):
         'SELECT COUNT(*) AS total FROM auth_attempts',
         one=True,
     )['total'] == 10
+
+
+def test_first_staff_setup_creates_one_owner_then_closes(client, monkeypatch):
+    setup_token = 'a-secure-one-time-token-with-more-than-32-characters'
+    monkeypatch.setenv('STAFF_SETUP_TOKEN', setup_token)
+    login_page = client.get('/login')
+    assert b'/staff/setup' in login_page.data
+    setup_page = client.get('/staff/setup')
+    assert setup_page.status_code == 200
+    with client.session_transaction() as sess:
+        csrf_token = sess['csrf_token']
+
+    created = client.post(
+        '/staff/setup',
+        data={
+            'csrf_token': csrf_token,
+            'fullname': 'Hotel Owner',
+            'phone': '0701234567',
+            'setup_token': setup_token,
+            'password': 'a-long-strong-owner-password',
+            'password_confirmation': 'a-long-strong-owner-password',
+        },
+    )
+    assert created.status_code == 302
+    assert created.headers['Location'].endswith('/admin')
+    owner = database.query_db(
+        'SELECT fullname, phone, role, active FROM staff_accounts',
+        one=True,
+    )
+    assert owner == {
+        'fullname': 'Hotel Owner',
+        'phone': '254701234567',
+        'role': 'owner',
+        'active': 1,
+    }
+    assert client.get('/admin').status_code == 200
+    assert client.get('/staff/setup').status_code == 404
+
+
+def test_first_staff_setup_requires_private_token_and_is_disabled_with_admin_env(client, monkeypatch):
+    monkeypatch.setenv('STAFF_SETUP_TOKEN', 'a-secure-one-time-token-with-more-than-32-characters')
+    client.get('/staff/setup')
+    with client.session_transaction() as sess:
+        csrf_token = sess['csrf_token']
+    failed = client.post(
+        '/staff/setup',
+        data={
+            'csrf_token': csrf_token,
+            'fullname': 'Untrusted Visitor',
+            'phone': '0701234567',
+            'setup_token': 'incorrect setup token',
+            'password': 'a-long-strong-owner-password',
+            'password_confirmation': 'a-long-strong-owner-password',
+        },
+    )
+    assert failed.status_code == 401
+    assert database.query_db('SELECT COUNT(*) AS total FROM staff_accounts', one=True)['total'] == 0
+
+    monkeypatch.setenv('ADMIN_PHONE', '254700000000')
+    monkeypatch.setenv('ADMIN_PASSWORD', 'existing-admin-password')
+    assert client.get('/staff/setup').status_code == 404
 
 
 def test_existing_database_migration_adds_order_created_at(tmp_path):

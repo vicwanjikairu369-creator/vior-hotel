@@ -12,6 +12,7 @@ environments that need the values, save, and redeploy.
 | `DATABASE_URL` | Yes for production | PostgreSQL connection string. SQLite is the local-development fallback and is not durable storage for Vercel functions. |
 | `ADMIN_PHONE` | For staff access | The Kenyan mobile number authorized for the current administrator login. |
 | `ADMIN_PASSWORD` | For staff access | A unique, long administrator password. Store it only in the hosting provider's environment settings. |
+| `STAFF_SETUP_TOKEN` | Optional first-time owner setup | Random secret of at least 32 characters; only needed when bootstrapping the first owner without `ADMIN_PHONE` and `ADMIN_PASSWORD`. |
 | `CLOUDINARY_CLOUD_NAME` | For admin media uploads | Cloudinary cloud name. |
 | `CLOUDINARY_API_KEY` | For admin media uploads | Cloudinary API key; used to sign short-lived uploads. |
 | `CLOUDINARY_API_SECRET` | For admin media uploads | Cloudinary API secret. Server-side only; never expose or commit it. |
@@ -47,6 +48,16 @@ both values in Vercel **Project Settings → Environment Variables** and redeplo
 Do not share the password in chat, source code, or a public issue. The protected
 `/admin` dashboard retains order operations and adds database-backed dish and
 story publishing.
+
+Alternatively, to bootstrap the first owner through the one-time registration
+page, leave both `ADMIN_PHONE` and `ADMIN_PASSWORD` unset, add a random
+`STAFF_SETUP_TOKEN` of at least 32 characters to the hosting environment, and
+redeploy. Open `/staff/setup` and register the owner using that token and a
+strong password. The first successful registration claims setup; the page then
+closes, and the owner can add manager, accountant, kitchen, or delivery staff
+from the dashboard. Do not share the setup token. If `ADMIN_PHONE` and
+`ADMIN_PASSWORD` are already configured, continue using those credentials to
+sign in and create staff from the dashboard instead.
 
 Dish/story images and videos are uploaded directly from the staff browser to
 Cloudinary. The Flask server creates a signed upload request; the Cloudinary

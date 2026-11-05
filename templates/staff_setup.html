@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#172923">
+    <title>First-Time Staff Setup - Vior Hotel</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="login-page">
+    <main class="auth-shell">
+        <section class="auth-story" aria-label="Vior Hotel operations">
+            <a class="register-brand" href="/">VIOR <span>HOTEL</span></a>
+            <div class="auth-story-copy">
+                <p class="register-kicker">Owner setup</p>
+                <h1>Set up your<br><em>operations access.</em></h1>
+                <p>Create the first owner account. This one-time setup requires the private token configured by the site administrator.</p>
+            </div>
+            <div class="register-story-foot"><span>01</span> &nbsp; First-time setup</div>
+        </section>
+
+        <section class="auth-panel">
+            <div class="register-panel-top"><span>VIOR HOTEL</span><span>OWNER SETUP</span></div>
+            <div class="register-form-wrap">
+                <p class="register-kicker">One-time registration</p>
+                <h2>Create owner account</h2>
+                <p class="register-intro">After setup, sign in here and create additional staff accounts from the Staff section in the dashboard.</p>
+                {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+                <form action="{{ url_for('setup_first_staff_account') }}" method="POST" class="register-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <div class="form-group">
+                        <label for="fullname">Full name</label>
+                        <input id="fullname" type="text" name="fullname" minlength="2" maxlength="80" autocomplete="name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="phone">Owner phone number</label>
+                        <input id="phone" type="tel" name="phone" autocomplete="tel" placeholder="07XXXXXXXX" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="setup_token">One-time setup token</label>
+                        <input id="setup_token" type="password" name="setup_token" autocomplete="off" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="password">Password (at least 12 characters)</label>
+                        <input id="password" type="password" name="password" minlength="12" maxlength="256" autocomplete="new-password" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="password_confirmation">Confirm password</label>
+                        <input id="password_confirmation" type="password" name="password_confirmation" minlength="12" maxlength="256" autocomplete="new-password" required>
+                    </div>
+                    <button type="submit" class="register-submit">Create owner account <span aria-hidden="true">↗</span></button>
+                </form>
+                <p class="register-admin"><a href="{{ url_for('login') }}">Back to staff sign in</a></p>
+            </div>
+            <div class="register-panel-foot">Service with precision.</div>
+        </section>
+    </main>
+</body>
+</html>

@@ -270,6 +270,13 @@ _SQLITE_SCHEMA = (
         attempted_at TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS staff_setup (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        owner_phone TEXT NOT NULL,
+        claimed_at TEXT NOT NULL
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_otp_phone_created_at ON otp_challenges (phone, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_otp_ip_created_at ON otp_challenges (request_ip, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_payments_order_number ON payments (order_number)",
@@ -533,6 +540,13 @@ _POSTGRES_SCHEMA = (
         id SERIAL PRIMARY KEY,
         request_ip TEXT NOT NULL,
         attempted_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS staff_setup (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        owner_phone TEXT NOT NULL,
+        claimed_at TEXT NOT NULL
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_otp_phone_created_at ON otp_challenges (phone, created_at)",

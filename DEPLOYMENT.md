@@ -54,6 +54,13 @@ The owner can then add manager, accountant, kitchen, or delivery staff from the
 dashboard. Keep the token private and remove it from hosting settings after
 the owner account is successfully created.
 
+For quick access, open `/login` (or `/admin`, which redirects to sign-in).
+On first setup, follow the owner-setup link on the sign-in page, choose the
+owner password there, and use that phone number and password for future sign-ins.
+Owners can change their password from the Staff section in the dashboard after
+confirming the current password. Do not hard-code a password in application
+source or share it in deployment configuration.
+
 Dish/story images and videos are uploaded directly from the staff browser to
 Cloudinary. The Flask server creates a signed upload request; the Cloudinary
 secret remains server-side. Configure the three Cloudinary variables above in

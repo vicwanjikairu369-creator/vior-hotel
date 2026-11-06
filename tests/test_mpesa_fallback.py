@@ -3,7 +3,7 @@ import sqlite3
 from unittest.mock import Mock, patch
 
 import pytest
-from werkzeug.security import generate_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from app import app
 import database
@@ -157,6 +157,67 @@ def test_staff_login_opens_admin_dashboard(client, monkeypatch):
     assert response.status_code == 302
     assert response.headers['Location'].endswith('/admin')
     assert client.get('/admin').status_code == 200
+
+
+def test_owner_can_change_password_from_dashboard(client, monkeypatch):
+    _staff_login(client, monkeypatch)
+    with client.session_transaction() as sess:
+        csrf_token = sess['csrf_token']
+
+    rejected = client.post(
+        '/admin/staff/password',
+        data={
+            'csrf_token': csrf_token,
+            'current_password': 'incorrect-current-password',
+            'new_password': 'a-new-strong-owner-password',
+            'password_confirmation': 'a-new-strong-owner-password',
+        },
+    )
+    assert rejected.status_code == 302
+    assert b'The current password is incorrect.' in client.get('/admin').data
+
+    changed = client.post(
+        '/admin/staff/password',
+        data={
+            'csrf_token': csrf_token,
+            'current_password': 'test-password',
+            'new_password': 'a-new-strong-owner-password',
+            'password_confirmation': 'a-new-strong-owner-password',
+        },
+    )
+    assert changed.status_code == 302
+    assert changed.headers['Location'].endswith('/admin#staff-management')
+    owner = database.query_db(
+        'SELECT password_hash FROM staff_accounts WHERE phone = %s',
+        ('254700000000',),
+        one=True,
+    )
+    assert check_password_hash(owner['password_hash'], 'a-new-strong-owner-password')
+    assert b'Owner password updated.' in client.get('/admin').data
+
+    client.get('/logout')
+    client.get('/login')
+    with client.session_transaction() as sess:
+        csrf_token = sess['csrf_token']
+    failed = client.post(
+        '/login',
+        data={
+            'phone': '0700000000',
+            'staff_password': 'test-password',
+            'csrf_token': csrf_token,
+        },
+    )
+    assert failed.status_code == 401
+    signed_in = client.post(
+        '/login',
+        data={
+            'phone': '0700000000',
+            'staff_password': 'a-new-strong-owner-password',
+            'csrf_token': csrf_token,
+        },
+    )
+    assert signed_in.status_code == 302
+    assert signed_in.headers['Location'].endswith('/admin')
 
 
 def test_staff_login_is_rate_limited_by_request_ip(client, monkeypatch):

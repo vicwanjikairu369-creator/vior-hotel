@@ -29,6 +29,9 @@
     </header>
 
     <main class="container admin-shell">
+        {% if staff_notice %}
+        <p class="{{ 'form-error' if staff_notice_type == 'error' else 'payment-notice' }}" role="{{ 'alert' if staff_notice_type == 'error' else 'status' }}">{{ staff_notice }}</p>
+        {% endif %}
         {% if can_manage_orders %}
         <section class="admin-panel">
             <div class="section-heading left">
@@ -334,6 +337,18 @@
             {% if can_manage_staff %}
             <section class="admin-panel content-management-panel" id="staff-management">
                 <div class="section-heading left"><p class="eyebrow eyebrow-red">Access control</p><h2>Staff accounts &amp; roles</h2></div>
+                {% if staff_role == 'owner' %}
+                <form action="{{ url_for('change_owner_password') }}" method="POST" class="content-editor-form">
+                    <h3>Change owner password</h3>
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <div class="admin-form-grid">
+                        <div class="form-group"><label for="currentOwnerPassword">Current password</label><input id="currentOwnerPassword" name="current_password" type="password" autocomplete="current-password" required></div>
+                        <div class="form-group"><label for="newOwnerPassword">New password (12–256 characters)</label><input id="newOwnerPassword" name="new_password" type="password" minlength="12" maxlength="256" autocomplete="new-password" required></div>
+                        <div class="form-group"><label for="confirmOwnerPassword">Confirm new password</label><input id="confirmOwnerPassword" name="password_confirmation" type="password" minlength="12" maxlength="256" autocomplete="new-password" required></div>
+                    </div>
+                    <button class="btn btn-primary" type="submit">Update owner password</button>
+                </form>
+                {% endif %}
                 <form action="{{ url_for('create_staff_account') }}" method="POST" class="content-editor-form">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <div class="admin-form-grid">

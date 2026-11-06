@@ -1570,6 +1570,8 @@ def admin_dashboard():
         customers=customers,
         staff_role=role,
         staff_name=session.get("staff_name", "Staff"),
+        staff_notice=session.pop("staff_notice", None),
+        staff_notice_type=session.pop("staff_notice_type", None),
         can_manage_orders=can_manage_orders,
         can_manage_content=can_manage_content,
         can_manage_inventory=can_manage_inventory,
@@ -2189,6 +2191,60 @@ def toggle_staff_account(staff_id):
     if changed != 1:
         return "Staff account not found.", 404
     _write_audit(session.get("staff_phone", "primary-admin"), "staff_access_changed", "staff", staff_id, {"active": active})
+    return redirect(url_for("admin_dashboard") + "#staff-management")
+
+
+@app.route("/admin/staff/password", methods=["POST"])
+def change_owner_password():
+    if not _is_admin() or session.get("staff_role") != "owner":
+        return "Only the owner can change the owner password.", 403
+    if not _valid_csrf_token():
+        return "Please refresh the page and try again.", 400
+
+    phone = session.get("staff_phone")
+    owner = query_db(
+        "SELECT password_hash FROM staff_accounts "
+        "WHERE phone = %s AND role = %s AND active = %s",
+        (phone, "owner", True),
+        one=True,
+    )
+    if not owner:
+        session.clear()
+        return redirect(url_for("login"))
+
+    current_password = str(request.form.get("current_password") or "")
+    new_password = str(request.form.get("new_password") or "")
+    confirmation = str(request.form.get("password_confirmation") or "")
+    message = None
+    message_type = "error"
+
+    if not check_password_hash(owner["password_hash"], current_password):
+        message = "The current password is incorrect."
+    elif len(new_password) < 12 or len(new_password) > 256:
+        message = "Choose a password between 12 and 256 characters."
+    elif new_password != confirmation:
+        message = "The password confirmation does not match."
+    else:
+        changed = query_db(
+            "UPDATE staff_accounts SET password_hash = %s "
+            "WHERE phone = %s AND role = %s AND active = %s AND password_hash = %s",
+            (
+                generate_password_hash(new_password),
+                phone,
+                "owner",
+                True,
+                owner["password_hash"],
+            ),
+        )
+        if changed != 1:
+            message = "The owner password changed during this request. Please try again."
+        else:
+            message = "Owner password updated."
+            message_type = "success"
+            _write_audit(phone, "owner_password_changed", "staff", phone, {"role": "owner"})
+
+    session["staff_notice"] = message
+    session["staff_notice_type"] = message_type
     return redirect(url_for("admin_dashboard") + "#staff-management")
 
 

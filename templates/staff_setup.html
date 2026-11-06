@@ -28,28 +28,34 @@
                 <p class="register-kicker">One-time registration</p>
                 <h2>Create owner account</h2>
                 <p class="register-intro">After setup, sign in here and create additional staff accounts from the Staff section in the dashboard.</p>
+                <p class="register-intro">Enter your own name (not the hotel name), the phone you will use to sign in, the setup token from your hosting settings, and a password you choose.</p>
                 {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
                 <form action="{{ url_for('setup_first_staff_account') }}" method="POST" class="register-form">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <div class="form-group">
                         <label for="fullname">Full name</label>
-                        <input id="fullname" type="text" name="fullname" minlength="2" maxlength="80" autocomplete="name" required>
+                        <input id="fullname" type="text" name="fullname" minlength="2" maxlength="80" autocomplete="name" aria-describedby="fullname-help" required>
+                        <small id="fullname-help">Your own name as the account owner, not the hotel or business name.</small>
                     </div>
                     <div class="form-group">
                         <label for="phone">Owner phone number</label>
-                        <input id="phone" type="tel" name="phone" autocomplete="tel" placeholder="07XXXXXXXX" required>
+                        <input id="phone" type="tel" name="phone" autocomplete="tel" placeholder="07XXXXXXXX" aria-describedby="owner-phone-help" required>
+                        <small id="owner-phone-help">Use your Kenyan mobile number. You will enter this number whenever you sign in.</small>
                     </div>
                     <div class="form-group">
                         <label for="setup_token">One-time setup token</label>
-                        <input id="setup_token" type="password" name="setup_token" autocomplete="off" required>
+                        <input id="setup_token" type="password" name="setup_token" autocomplete="off" aria-describedby="setup-token-help" required>
+                        <small id="setup-token-help">Paste the value of STAFF_SETUP_TOKEN from your hosting environment settings. This is not your name or account password.</small>
                     </div>
                     <div class="form-group">
                         <label for="password">Password (at least 12 characters)</label>
-                        <input id="password" type="password" name="password" minlength="12" maxlength="256" autocomplete="new-password" required>
+                        <input id="password" type="password" name="password" minlength="12" maxlength="256" autocomplete="new-password" aria-describedby="owner-password-help" required>
+                        <small id="owner-password-help">Choose a private password of 12–256 characters for future staff sign-ins.</small>
                     </div>
                     <div class="form-group">
                         <label for="password_confirmation">Confirm password</label>
-                        <input id="password_confirmation" type="password" name="password_confirmation" minlength="12" maxlength="256" autocomplete="new-password" required>
+                        <input id="password_confirmation" type="password" name="password_confirmation" minlength="12" maxlength="256" autocomplete="new-password" aria-describedby="password-confirmation-help" required>
+                        <small id="password-confirmation-help">Enter the same password again to confirm it.</small>
                     </div>
                     <button type="submit" class="register-submit">Create owner account <span aria-hidden="true">↗</span></button>
                 </form>

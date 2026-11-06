@@ -36,7 +36,8 @@
                     <input type="hidden" name="action" value="verify">
                     <div class="form-group">
                         <label for="code">Verification code</label>
-                        <input id="code" type="text" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus>
+                        <input id="code" type="text" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" aria-describedby="verification-code-help" required autofocus>
+                        <small id="verification-code-help">Enter the six-digit code sent to the mobile number shown above.</small>
                     </div>
                     <button type="submit" class="register-submit">Verify phone <span aria-hidden="true">↗</span></button>
                 </form>
@@ -51,7 +52,8 @@
                     <input type="hidden" name="action" value="request">
                     <div class="form-group">
                         <label for="fullname">Your name</label>
-                        <input id="fullname" type="text" name="fullname" value="{{ fullname|default('') }}" placeholder="How should we address you?" autocomplete="name" minlength="2" maxlength="80" required autofocus>
+                        <input id="fullname" type="text" name="fullname" value="{{ fullname|default('') }}" placeholder="How should we address you?" autocomplete="name" minlength="2" maxlength="80" aria-describedby="customer-name-help" required autofocus>
+                        <small id="customer-name-help">Enter the name you would like us to use for your account and orders.</small>
                     </div>
                     <div class="form-group">
                         <label for="phone">Mobile number</label>

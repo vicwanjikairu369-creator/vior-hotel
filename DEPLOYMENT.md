@@ -48,11 +48,13 @@ protected and requires an authorized staff account.
 
 To register the first owner, add a random `STAFF_SETUP_TOKEN` of at least 32
 characters to the hosting environment and redeploy. Open `/staff/setup` and
-register the owner using that token, a Kenyan mobile number, and a strong
-password. The first successful registration claims setup and closes the page.
-The owner can then add manager, accountant, kitchen, or delivery staff from the
-dashboard. Keep the token private and remove it from hosting settings after
-the owner account is successfully created.
+register the owner using their personal full name (not the hotel name), their
+Kenyan mobile number, that setup token, and a strong password they choose. The
+phone number and chosen password are used for later staff sign-ins. The first
+successful registration claims setup and closes the page. The owner can then
+add manager, accountant, kitchen, or delivery staff from the dashboard. Keep
+the token private and remove it from hosting settings after the owner account
+is successfully created.
 
 For quick access, open `/login` (or `/admin`, which redirects to sign-in).
 On first setup, follow the owner-setup link on the sign-in page, choose the

@@ -350,12 +350,14 @@
                 </form>
                 {% endif %}
                 <form action="{{ url_for('create_staff_account') }}" method="POST" class="content-editor-form">
+                    <h3>Create a staff account</h3>
+                    <p>Enter the staff member’s personal name and Kenyan phone number. Set a temporary password and share it with them privately; choose the role that matches their duties.</p>
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <div class="admin-form-grid">
-                        <div class="form-group"><label for="staffFullname">Full name</label><input id="staffFullname" name="fullname" maxlength="80" required></div>
-                        <div class="form-group"><label for="staffPhone">Phone</label><input id="staffPhone" name="phone" type="tel" required></div>
-                        <div class="form-group"><label for="staffPassword">Temporary password (min 12 chars)</label><input id="staffPassword" name="password" type="password" minlength="12" autocomplete="new-password" required></div>
-                        <div class="form-group"><label for="staffRole">Role</label><select id="staffRole" name="role"><option value="manager">Manager</option><option value="accountant">Accountant</option><option value="kitchen">Kitchen</option><option value="delivery">Delivery</option></select></div>
+                        <div class="form-group"><label for="staffFullname">Full name</label><input id="staffFullname" name="fullname" maxlength="80" aria-describedby="staff-name-help" required><small id="staff-name-help">Enter the staff member’s name, not the hotel name.</small></div>
+                        <div class="form-group"><label for="staffPhone">Phone</label><input id="staffPhone" name="phone" type="tel" placeholder="07XXXXXXXX" aria-describedby="staff-phone-help" required><small id="staff-phone-help">Their Kenyan mobile number; they will use it to sign in.</small></div>
+                        <div class="form-group"><label for="staffPassword">Temporary password (min 12 chars)</label><input id="staffPassword" name="password" type="password" minlength="12" autocomplete="new-password" aria-describedby="staff-password-help" required><small id="staff-password-help">At least 12 characters. Share it privately with the staff member.</small></div>
+                        <div class="form-group"><label for="staffRole">Role</label><select id="staffRole" name="role" aria-describedby="staff-role-help"><option value="manager">Manager</option><option value="accountant">Accountant</option><option value="kitchen">Kitchen</option><option value="delivery">Delivery</option></select><small id="staff-role-help">Choose the permissions needed for their duties.</small></div>
                     </div>
                     <button class="btn btn-primary" type="submit">Create staff account</button>
                 </form>
